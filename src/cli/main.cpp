@@ -6,60 +6,16 @@
 #include "slang/ast/Compilation.h"
 #include "slang/syntax/SyntaxTree.h"
 
+#include <CLI/CLI.hpp>
 #include <fmt/format.h>
 #include <fmt/ostream.h>
 
 #include <cstdio>
 #include <fstream>
 #include <string>
-#include <string_view>
 #include <vector>
 
 namespace {
-
-struct Args {
-  std::string file;
-  std::string top;
-  std::string dumpGraphPath;
-  std::string stimulusPath;
-};
-
-atpg::Result<Args> parseArgs(int argc, char** argv) {
-  Args args;
-  std::vector<std::string_view> positional;
-
-  for (int i = 1; i < argc; ++i) {
-    const std::string_view arg = argv[i];
-
-    if (arg == "--top" || arg == "--dump-graph" || arg == "--stimulus") {
-      if (i + 1 >= argc) {
-        return atpg::Error(fmt::format("missing value for {}", arg));
-      }
-      const std::string value = argv[++i];
-      if (arg == "--top") {
-        args.top = value;
-      } else if (arg == "--dump-graph") {
-        args.dumpGraphPath = value;
-      } else {
-        args.stimulusPath = value;
-      }
-    } else {
-      positional.push_back(arg);
-    }
-  }
-
-  if (positional.size() != 1) {
-    return atpg::Error("usage: atpg <file.sv> --top <module> "
-                       "[--dump-graph out.dot] [--stimulus vectors.txt]");
-  }
-  args.file = positional.front();
-
-  if (args.top.empty()) {
-    return atpg::Error("--top <module> is required");
-  }
-
-  return args;
-}
 
 void writeDot(const atpg::ir::Graph& graph, std::ostream& os) {
   fmt::print(os, "digraph atpg {{\n");
@@ -112,14 +68,31 @@ atpg::Status runStimulus(const atpg::ir::Graph& graph, const std::string& path) 
 } // namespace
 
 int main(int argc, char** argv) {
-  const atpg::Result<Args> argsResult = parseArgs(argc, argv);
-  if (!argsResult) {
-    fmt::print(stderr, "error: {}\n", argsResult.error());
-    return 1;
-  }
-  const Args& args = argsResult.value();
+  CLI::App app{"atpg - flattens a gate-level SystemVerilog design (built from SV gate "
+              "primitives) into a combinational gate graph and simulates it"};
+  argv = app.ensure_utf8(argv);
 
-  auto treeResult = slang::syntax::SyntaxTree::fromFile(args.file);
+  std::string file;
+  std::string top;
+  std::string dumpGraphPath;
+  std::string stimulusPath;
+
+  app.add_option("file", file, "SystemVerilog file containing the design")
+      ->required()
+      ->check(CLI::ExistingFile);
+  app.add_option("--top", top, "Top module name")->required();
+  app.add_option("--dump-graph", dumpGraphPath, "Write the flattened gate graph as Graphviz dot");
+  app.add_option("--stimulus", stimulusPath,
+                "Read newline-separated 0/1 stimulus vectors and simulate each one");
+
+  // CLI11's App::parse() is the one place in atpg that reports failure via a
+  // thrown CLI::ParseError rather than atpg::Status/Result - it has no
+  // non-throwing entry point. CLI11_PARSE is the library's own standard
+  // idiom for catching that at the boundary and turning it into a plain
+  // exit code, matching how atpg reports every other error.
+  CLI11_PARSE(app, argc, argv);
+
+  auto treeResult = slang::syntax::SyntaxTree::fromFile(file);
   if (!treeResult) {
     fmt::print(stderr, "error: {}\n", treeResult.error().second);
     return 1;
@@ -134,24 +107,24 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  const atpg::Result<atpg::ir::Graph> graphResult = atpg::frontend::buildGraph(compilation, args.top);
+  const atpg::Result<atpg::ir::Graph> graphResult = atpg::frontend::buildGraph(compilation, top);
   if (!graphResult) {
     fmt::print(stderr, "error: {}\n", graphResult.error());
     return 1;
   }
   const atpg::ir::Graph& graph = graphResult.value();
 
-  if (!args.dumpGraphPath.empty()) {
-    std::ofstream ofs(args.dumpGraphPath);
+  if (!dumpGraphPath.empty()) {
+    std::ofstream ofs(dumpGraphPath);
     if (!ofs) {
-      fmt::print(stderr, "error: could not open {} for writing\n", args.dumpGraphPath);
+      fmt::print(stderr, "error: could not open {} for writing\n", dumpGraphPath);
       return 1;
     }
     writeDot(graph, ofs);
   }
 
-  if (!args.stimulusPath.empty()) {
-    const atpg::Status simStatus = runStimulus(graph, args.stimulusPath);
+  if (!stimulusPath.empty()) {
+    const atpg::Status simStatus = runStimulus(graph, stimulusPath);
     if (!simStatus) {
       fmt::print(stderr, "error: {}\n", simStatus.error());
       return 1;

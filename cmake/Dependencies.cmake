@@ -31,6 +31,12 @@ FetchContent_Declare(
   GIT_TAG v3.15.3
   GIT_SHALLOW TRUE)
 
-FetchContent_MakeAvailable(slang Catch2)
+FetchContent_Declare(
+  CLI11
+  GIT_REPOSITORY https://github.com/CLIUtils/CLI11.git
+  GIT_TAG v2.7.2
+  GIT_SHALLOW TRUE)
+
+FetchContent_MakeAvailable(slang Catch2 CLI11)
 
 list(APPEND CMAKE_MODULE_PATH "${catch2_SOURCE_DIR}/extras")
