@@ -1,0 +1,14 @@
+add_executable(
+  atpg-tests
+  Test.hpp
+  ir/GraphTests.cpp
+  frontend/FrontendTests.cpp
+  sim/LogicSimTests.cpp)
+
+target_link_libraries(atpg-tests PRIVATE atpg-core slang::slang Catch2::Catch2WithMain)
+target_include_directories(atpg-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(
+  atpg-tests PRIVATE ATPG_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../data")
+
+include(Catch)
+catch_discover_tests(atpg-tests)
