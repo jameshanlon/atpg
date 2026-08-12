@@ -69,8 +69,9 @@ private:
 #define ATPG_RETURN_IF_ERROR(expr)                                                               \
   do {                                                                                            \
     auto ATPG_CONCAT(atpgStatus, __LINE__) = (expr);                                              \
-    if (!ATPG_CONCAT(atpgStatus, __LINE__).ok())                                                  \
+    if (!ATPG_CONCAT(atpgStatus, __LINE__).ok()) {                                                \
       return ::atpg::Error(ATPG_CONCAT(atpgStatus, __LINE__).error());                            \
+    }                                                                                             \
   } while (false)
 
 /// Evaluates a Result<T>-returning expression, propagating its error (as
@@ -78,6 +79,7 @@ private:
 /// value, e.g. `ATPG_ASSIGN_OR_RETURN(auto width, getWidth());`.
 #define ATPG_ASSIGN_OR_RETURN(decl, expr)                                                         \
   auto ATPG_CONCAT(atpgResult, __LINE__) = (expr);                                                \
-  if (!ATPG_CONCAT(atpgResult, __LINE__).ok())                                                    \
+  if (!ATPG_CONCAT(atpgResult, __LINE__).ok()) {                                                  \
     return ::atpg::Error(ATPG_CONCAT(atpgResult, __LINE__).error());                              \
+  }                                                                                                \
   decl = std::move(ATPG_CONCAT(atpgResult, __LINE__).value())
