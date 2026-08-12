@@ -17,6 +17,8 @@
 #include "slang/diagnostics/DiagnosticEngine.h"
 #include "slang/syntax/SyntaxTree.h"
 
+#include <fmt/format.h>
+
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -40,21 +42,21 @@ Result<GateType> gateTypeForPrimitive(std::string_view primitiveName) {
   if (auto type = ir::gateTypeFromPrimitiveName(primitiveName)) {
     return *type;
   }
-  return Error("unsupported primitive type: " + std::string(primitiveName));
+  return Error(fmt::format("unsupported primitive type: {}", primitiveName));
 }
 
 std::string joinPath(std::string_view prefix, std::string_view name) {
   if (prefix.empty()) {
     return std::string(name);
   }
-  return std::string(prefix) + "." + std::string(name);
+  return fmt::format("{}.{}", prefix, name);
 }
 
 std::string bitName(const Symbol& symbol, uint64_t bit, uint64_t width) {
   if (width <= 1) {
     return std::string(symbol.name);
   }
-  return std::string(symbol.name) + "[" + std::to_string(bit) + "]";
+  return fmt::format("{}[{}]", symbol.name, bit);
 }
 
 /// A statically-resolved reference to a contiguous bit range of a value
@@ -171,12 +173,12 @@ private:
   // frontend supports.
   static Result<const PortSymbol*> asSupportedPort(const Symbol& portSymbol) {
     if (portSymbol.kind != SymbolKind::Port) {
-      return Error("unsupported port kind on '" + std::string(portSymbol.name) + "'");
+      return Error(fmt::format("unsupported port kind on '{}'", portSymbol.name));
     }
 
     const auto& port = portSymbol.as<PortSymbol>();
     if (port.internalSymbol == nullptr) {
-      return Error("unsupported port '" + std::string(port.name) + "': no internal net");
+      return Error(fmt::format("unsupported port '{}': no internal net", port.name));
     }
     return &port;
   }
@@ -198,8 +200,9 @@ private:
         } else if (port->direction == ArgumentDirection::Out) {
           poPorts_.emplace_back(std::move(key), std::move(displayName));
         } else {
-          return Error("unsupported port direction on '" + std::string(port->name) +
-                       "': only input and output are supported");
+          return Error(fmt::format(
+              "unsupported port direction on '{}': only input and output are supported",
+              port->name));
         }
       }
     }
@@ -215,14 +218,14 @@ private:
 
       const Expression* expr = pc->getExpression();
       if (expr == nullptr) {
-        return Error("unconnected port '" + std::string(childPort->name) + "' on instance '" +
-                     std::string(child.name) + "'");
+        return Error(fmt::format("unconnected port '{}' on instance '{}'", childPort->name,
+                                 child.name));
       }
 
       ATPG_ASSIGN_OR_RETURN(const ResolvedPath rp, resolvePath(*expr));
       if (rp.width != width) {
-        return Error("port width mismatch connecting '" + std::string(childPort->name) +
-                     "' on instance '" + std::string(child.name) + "'");
+        return Error(fmt::format("port width mismatch connecting '{}' on instance '{}'",
+                                 childPort->name, child.name));
       }
 
       for (uint64_t bit = 0; bit < width; ++bit) {
@@ -238,7 +241,7 @@ private:
     ATPG_ASSIGN_OR_RETURN(const GateType type, gateTypeForPrimitive(prim.primitiveType.name));
     const auto connections = prim.getPortConnections();
     if (connections.empty()) {
-      return Error("primitive '" + std::string(prim.name) + "': no port connections");
+      return Error(fmt::format("primitive '{}': no port connections", prim.name));
     }
 
     GateSpec spec;
@@ -302,9 +305,10 @@ private:
       } else if (member.kind == SymbolKind::PrimitiveInstance) {
         ATPG_RETURN_IF_ERROR(collectPrimitive(member.as<PrimitiveInstanceSymbol>(), pathPrefix));
       } else if (!isHarmlessDeclaration(member.kind)) {
-        return Error("unsupported construct '" + std::string(member.name) + "' (" +
-                     std::string(toString(member.kind)) +
-                     "): only gate primitives and module instances are supported");
+        return Error(fmt::format(
+            "unsupported construct '{}' ({}): only gate primitives and module instances are "
+            "supported",
+            member.name, toString(member.kind)));
       }
     }
     return {};
@@ -319,7 +323,7 @@ private:
     auto registerDriver = [&](const std::string& key, GateId gid) -> Status {
       const std::string canon = find(key);
       if (!netToDriver.try_emplace(canon, gid).second) {
-        return Error("net driven by multiple sources: " + canon);
+        return Error(fmt::format("net driven by multiple sources: {}", canon));
       }
       return {};
     };
@@ -348,7 +352,7 @@ private:
         const std::string canon = find(key);
         auto it = netToDriver.find(canon);
         if (it == netToDriver.end()) {
-          return Error("net '" + canon + "' is read before it is driven");
+          return Error(fmt::format("net '{}' is read before it is driven", canon));
         }
         graph.addEdge(it->second, specGateIds[i]);
       }
@@ -358,7 +362,7 @@ private:
       const std::string canon = find(key);
       auto it = netToDriver.find(canon);
       if (it == netToDriver.end()) {
-        return Error("output '" + displayName + "' is never driven");
+        return Error(fmt::format("output '{}' is never driven", displayName));
       }
       graph.addEdge(it->second, graph.addGate(GateType::Po, displayName));
     }
@@ -392,7 +396,7 @@ Result<ir::Graph> buildGraph(Compilation& compilation, std::string_view topModul
     }
   }
   if (top == nullptr) {
-    return Error("top module not found: " + std::string(topModuleName));
+    return Error(fmt::format("top module not found: {}", topModuleName));
   }
 
   Builder builder(top->body);

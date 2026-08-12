@@ -6,8 +6,11 @@
 #include "slang/ast/Compilation.h"
 #include "slang/syntax/SyntaxTree.h"
 
+#include <fmt/format.h>
+#include <fmt/ostream.h>
+
+#include <cstdio>
 #include <fstream>
-#include <iostream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -30,7 +33,7 @@ atpg::Result<Args> parseArgs(int argc, char** argv) {
 
     if (arg == "--top" || arg == "--dump-graph" || arg == "--stimulus") {
       if (i + 1 >= argc) {
-        return atpg::Error("missing value for " + std::string(arg));
+        return atpg::Error(fmt::format("missing value for {}", arg));
       }
       const std::string value = argv[++i];
       if (arg == "--top") {
@@ -59,25 +62,25 @@ atpg::Result<Args> parseArgs(int argc, char** argv) {
 }
 
 void writeDot(const atpg::ir::Graph& graph, std::ostream& os) {
-  os << "digraph atpg {\n";
+  fmt::print(os, "digraph atpg {{\n");
   for (std::size_t i = 0; i < graph.size(); ++i) {
     const auto& gate = graph.gate(static_cast<atpg::ir::GateId>(i));
-    os << "  n" << gate.id << " [label=\"" << gate.name << "\\n" << atpg::ir::gateTypeName(gate.type)
-       << "\"];\n";
+    fmt::print(os, "  n{} [label=\"{}\\n{}\"];\n", gate.id, gate.name,
+              atpg::ir::gateTypeName(gate.type));
   }
   for (std::size_t i = 0; i < graph.size(); ++i) {
     const auto& gate = graph.gate(static_cast<atpg::ir::GateId>(i));
     for (const atpg::ir::GateId succ : gate.fanout) {
-      os << "  n" << gate.id << " -> n" << succ << ";\n";
+      fmt::print(os, "  n{} -> n{};\n", gate.id, succ);
     }
   }
-  os << "}\n";
+  fmt::print(os, "}}\n");
 }
 
 atpg::Status runStimulus(const atpg::ir::Graph& graph, const std::string& path) {
   std::ifstream ifs(path);
   if (!ifs) {
-    return atpg::Error("could not open stimulus file: " + path);
+    return atpg::Error(fmt::format("could not open stimulus file: {}", path));
   }
 
   std::string line;
@@ -95,10 +98,13 @@ atpg::Status runStimulus(const atpg::ir::Graph& graph, const std::string& path) 
     }
 
     ATPG_ASSIGN_OR_RETURN(const std::vector<bool> outputs, atpg::sim::simulate(graph, piValues));
+
+    std::string bits;
+    bits.reserve(outputs.size());
     for (const bool bit : outputs) {
-      std::cout << (bit ? '1' : '0');
+      bits.push_back(bit ? '1' : '0');
     }
-    std::cout << '\n';
+    fmt::print("{}\n", bits);
   }
   return {};
 }
@@ -108,14 +114,14 @@ atpg::Status runStimulus(const atpg::ir::Graph& graph, const std::string& path) 
 int main(int argc, char** argv) {
   const atpg::Result<Args> argsResult = parseArgs(argc, argv);
   if (!argsResult) {
-    std::cerr << "error: " << argsResult.error() << '\n';
+    fmt::print(stderr, "error: {}\n", argsResult.error());
     return 1;
   }
   const Args& args = argsResult.value();
 
   auto treeResult = slang::syntax::SyntaxTree::fromFile(args.file);
   if (!treeResult) {
-    std::cerr << "error: " << treeResult.error().second << '\n';
+    fmt::print(stderr, "error: {}\n", treeResult.error().second);
     return 1;
   }
 
@@ -124,13 +130,13 @@ int main(int argc, char** argv) {
 
   const atpg::Status diagStatus = atpg::frontend::requireNoErrors(compilation);
   if (!diagStatus) {
-    std::cerr << diagStatus.error();
+    fmt::print(stderr, "{}", diagStatus.error());
     return 1;
   }
 
   const atpg::Result<atpg::ir::Graph> graphResult = atpg::frontend::buildGraph(compilation, args.top);
   if (!graphResult) {
-    std::cerr << "error: " << graphResult.error() << '\n';
+    fmt::print(stderr, "error: {}\n", graphResult.error());
     return 1;
   }
   const atpg::ir::Graph& graph = graphResult.value();
@@ -138,7 +144,7 @@ int main(int argc, char** argv) {
   if (!args.dumpGraphPath.empty()) {
     std::ofstream ofs(args.dumpGraphPath);
     if (!ofs) {
-      std::cerr << "error: could not open " << args.dumpGraphPath << " for writing\n";
+      fmt::print(stderr, "error: could not open {} for writing\n", args.dumpGraphPath);
       return 1;
     }
     writeDot(graph, ofs);
@@ -147,7 +153,7 @@ int main(int argc, char** argv) {
   if (!args.stimulusPath.empty()) {
     const atpg::Status simStatus = runStimulus(graph, args.stimulusPath);
     if (!simStatus) {
-      std::cerr << "error: " << simStatus.error() << '\n';
+      fmt::print(stderr, "error: {}\n", simStatus.error());
       return 1;
     }
   }
