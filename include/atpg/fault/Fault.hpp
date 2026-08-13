@@ -40,8 +40,10 @@ struct Fault {
 /// (e.g. both polarities for Buf/Not, one polarity for
 /// And/Nand/Or/Nor), or kept as its own class otherwise (a primary
 /// input, an Xor/Xnor gate, or the non-equivalence polarity of
-/// And/Nand/Or/Nor - dominance alone isn't enough to drop a fault, since
-/// the dominating fault could itself be redundant). Other faults that
+/// And/Nand/Or/Nor, where the output fault only *dominates* the gate's
+/// own input faults rather than being equivalent to them - dominance
+/// alone isn't enough to drop a fault, since the dominated fault that
+/// would stand in for it could itself be redundant). Other faults that
 /// happen to be locally equivalent to a dropped stem polarity (e.g. a
 /// primary input feeding that gate, or one of the gate's own input pins)
 /// still get their own class, since the checkpoint theorem requires every

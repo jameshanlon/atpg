@@ -72,7 +72,7 @@ FaultList generateFaultList(const ir::Graph& graph) {
   // -- phase 1: local per-gate equivalence ---------------------------------
   //
   // outputIsEquivalence[outIdx(gate, value)] records that this exact output
-  // atom was proven *equivalent* (not merely dominated) to at least one of
+  // atom was proven *equivalent* (not merely dominating) at least one of
   // the gate's own input atoms - phase 2 uses this to decide whether a
   // stem's output atom is safe to drop (see below).
 
@@ -83,8 +83,10 @@ FaultList generateFaultList(const ir::Graph& graph) {
     const std::size_t n = gate.fanin.size();
 
     // A gate with no inputs has nothing to be equivalent to, regardless of
-    // type - mergeAllInputs below is a no-op for n == 0, so this guard
-    // just makes that explicit rather than silently marking nothing.
+    // type. The SV frontend never produces a gate primitive with 0 fanin,
+    // so this never triggers today - but skipping it would both mark a
+    // false equivalence and, for Buf/Not, read out of bounds from an
+    // empty input-pin array below.
     auto mergeAllInputs = [&](StuckValue inputValue, StuckValue outputValue) {
       if (n == 0) {
         return;
@@ -109,12 +111,18 @@ FaultList generateFaultList(const ir::Graph& graph) {
         mergeAllInputs(StuckValue::SA1, StuckValue::SA0);
         break;
       case ir::GateType::Buf:
+        if (n == 0) {
+          break;
+        }
         outputIsEquivalence[outIdx(gate.id, StuckValue::SA0)] = true;
         outputIsEquivalence[outIdx(gate.id, StuckValue::SA1)] = true;
         uf.unite(inIdx(gate.id, 0, StuckValue::SA0), outIdx(gate.id, StuckValue::SA0));
         uf.unite(inIdx(gate.id, 0, StuckValue::SA1), outIdx(gate.id, StuckValue::SA1));
         break;
       case ir::GateType::Not:
+        if (n == 0) {
+          break;
+        }
         outputIsEquivalence[outIdx(gate.id, StuckValue::SA0)] = true;
         outputIsEquivalence[outIdx(gate.id, StuckValue::SA1)] = true;
         uf.unite(inIdx(gate.id, 0, StuckValue::SA1), outIdx(gate.id, StuckValue::SA0));
@@ -147,16 +155,20 @@ FaultList generateFaultList(const ir::Graph& graph) {
   //     merged into a branch. Whether a specific output polarity can be
   //     safely *dropped* instead (rather than kept as its own class)
   //     depends on whether phase 1 already proved it *equivalent* (not
-  //     merely dominated) to one of the gate's own input faults, i.e.
-  //     `outputIsEquivalence` above. Dominance alone isn't enough: a
-  //     dominating input fault can itself be redundant (undetectable)
-  //     while the dominated output fault is detectable, in which case
-  //     dropping the output fault would lose it with nothing left to
-  //     stand in for it - proving a fault non-redundant requires full
-  //     ATPG, well outside what this stage does. Only an exact,
-  //     unconditional equivalence removes that risk, so only the
-  //     `outputIsEquivalence` polarity is dropped; the other polarity is
-  //     kept as its own class, exactly like a fanout==0 gate's or a Pi's.
+  //     merely dominating) one of the gate's own input faults, i.e.
+  //     `outputIsEquivalence` above. Dominance alone isn't enough: for the
+  //     other polarity, the output fault only *dominates* the gate's own
+  //     input faults (every test detecting an input fault also detects
+  //     the output fault, but not vice versa), so the input fault - the
+  //     one that would survive as the output fault's stand-in - can
+  //     itself be redundant (undetectable) while the output fault remains
+  //     detectable. Since nothing can prove a fault non-redundant without
+  //     full ATPG, well outside what this stage does, dropping on
+  //     dominance alone risks losing the output fault with nothing left
+  //     to stand in for it. Only an exact, unconditional equivalence
+  //     removes that risk, so only the `outputIsEquivalence` polarity is
+  //     dropped; the other polarity is kept as its own class, exactly
+  //     like a fanout==0 gate's or a Pi's.
   //     For a dropped polarity, only that bare output atom is excluded,
   //     never the rest of whatever class phase 1 placed it in - that
   //     class typically also contains the gate's own input pins, and

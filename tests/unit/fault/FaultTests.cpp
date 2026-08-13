@@ -165,9 +165,9 @@ TEST_CASE("fanout branches through NOT gates stay independent", "[FaultList]") {
   const FaultList faults = generateFaultList(graph);
 
   // a is a Pi with fanout 2: nothing among its own (nonexistent) input
-  // pins can dominate its output faults, so they're kept as their own
-  // class rather than dropped - 2 extra atoms/classes versus a
-  // hypothetical dominance-backed stem.
+  // pins can be equivalent to its output faults, so they're kept as their
+  // own class rather than dropped - 2 extra atoms/classes versus a
+  // hypothetical equivalence-backed stem.
   CHECK(faults.size() == 6);
   CHECK(totalAtoms(faults) == 14);
 }
@@ -237,10 +237,10 @@ TEST_CASE("a full adder's fault list covers every atomic fault exactly once", "[
 
   // 3 PIs x 2 + 5 internal 2-input gates x 6 + 2 POs x 2 = 40 atomic
   // faults. a, b, cin (Pi) and x1 (Xor) all have fanout 2, but none of
-  // their gate types have a controlling value for phase 1 to dominate
-  // their output faults with, so none of them are dropped - the full 40
-  // atoms all survive, in fewer than 40 classes (some still merge via the
-  // fanout==1 checkpoint-theorem case).
+  // their gate types have a controlling value for phase 1 to make their
+  // output faults equivalent to anything, so none of them are dropped -
+  // the full 40 atoms all survive, in fewer than 40 classes (some still
+  // merge via the fanout==1 checkpoint-theorem case).
   CHECK(totalAtoms(faults) == 40);
   CHECK(allFaultsDistinct(faults));
   CHECK(faults.size() < 40);
@@ -290,8 +290,8 @@ TEST_CASE("c17's fault list covers every atomic fault exactly once", "[FaultList
   // and n16 are the fanout-2 stems. n11 and n16 are Nand-typed, so phase 1
   // already proved output/SA1 an exact equivalence with their own
   // input/SA0 faults - only that one polarity's bare output atom (1 per
-  // gate, 2 total) is dropped; output/SA0 is only dominated (not exactly
-  // equivalent) by their input/SA1 faults, so it's kept as its own class.
+  // gate, 2 total) is dropped; output/SA0 only dominates (isn't exactly
+  // equivalent to) their input/SA1 faults, so it's kept as its own class.
   // Their input pins also survive as their own class, since they're
   // themselves fanout-branch checkpoints (e.g. n11's connection to n3)
   // the checkpoint theorem requires to stay represented. n3 is a Pi, with
@@ -352,9 +352,10 @@ TEST_CASE("a Pi stem feeding a reconvergent fanout keeps its own fault, "
 
   const FaultList faults = generateFaultList(graph);
 
-  // stem is a Pi: it has no input pins for phase 1 to dominate its output
-  // faults with, so - unlike a Nand/And/Or/Nor/Buf/Not stem - its faults
-  // are kept as their own class rather than dropped.
+  // stem is a Pi: it has no input pins for phase 1 to make its output
+  // faults equivalent to, so - unlike a Buf/Not stem, or the
+  // equivalence-polarity output of a Nand/And/Or/Nor stem - both of its
+  // faults are kept as their own class rather than dropped.
   CHECK(faults.size() == 8);
   CHECK(totalAtoms(faults) == 18);
   CHECK(allFaultsDistinct(faults));
@@ -424,9 +425,9 @@ TEST_CASE("a locally-fused stem drops only its own output atoms, not the "
     }
   }
 
-  // output/SA0 has no exact equivalence (it's only dominated by g's
-  // input/SA1 faults, which could themselves be redundant), so it's kept
-  // as its own class rather than dropped.
+  // output/SA0 has no exact equivalence (it only dominates g's input/SA1
+  // faults, which could themselves be redundant), so it's kept as its own
+  // class rather than dropped.
   const Fault gOutSA0{PinRef{g, PinKind::Output, 0}, StuckValue::SA0};
   bool foundGOutSA0 = false;
   for (const auto& faultClass : faults) {
