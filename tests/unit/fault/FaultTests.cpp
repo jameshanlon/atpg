@@ -55,3 +55,73 @@ TEST_CASE("Fault equality compares pin and stuck value", "[Fault]") {
   CHECK(a == b);
   CHECK_FALSE(a == c);
 }
+
+namespace {
+
+FaultList generateForBinaryGate(GateType type) {
+  Graph graph;
+  const GateId a = graph.addGate(GateType::Pi, "a");
+  const GateId b = graph.addGate(GateType::Pi, "b");
+  const GateId g = graph.addGate(type, "g");
+  const GateId y = graph.addGate(GateType::Po, "y");
+  graph.addEdge(a, g);
+  graph.addEdge(b, g);
+  graph.addEdge(g, y);
+  REQUIRE(graph.levelize().ok());
+  return generateFaultList(graph);
+}
+
+FaultList generateForUnaryGate(GateType type) {
+  Graph graph;
+  const GateId a = graph.addGate(GateType::Pi, "a");
+  const GateId g = graph.addGate(type, "g");
+  const GateId y = graph.addGate(GateType::Po, "y");
+  graph.addEdge(a, g);
+  graph.addEdge(g, y);
+  REQUIRE(graph.levelize().ok());
+  return generateFaultList(graph);
+}
+
+} // namespace
+
+TEST_CASE("a 2-input NAND gate collapses to 4 fault classes", "[FaultList]") {
+  const auto faults = generateForBinaryGate(GateType::Nand);
+  CHECK(faults.size() == 4);
+  CHECK(totalAtoms(faults) == 12);
+}
+
+TEST_CASE("a 2-input OR gate collapses to 4 fault classes", "[FaultList]") {
+  const auto faults = generateForBinaryGate(GateType::Or);
+  CHECK(faults.size() == 4);
+  CHECK(totalAtoms(faults) == 12);
+}
+
+TEST_CASE("a 2-input NOR gate collapses to 4 fault classes", "[FaultList]") {
+  const auto faults = generateForBinaryGate(GateType::Nor);
+  CHECK(faults.size() == 4);
+  CHECK(totalAtoms(faults) == 12);
+}
+
+TEST_CASE("a 2-input XOR gate collapses to 6 fault classes", "[FaultList]") {
+  const auto faults = generateForBinaryGate(GateType::Xor);
+  CHECK(faults.size() == 6);
+  CHECK(totalAtoms(faults) == 12);
+}
+
+TEST_CASE("a 2-input XNOR gate collapses to 6 fault classes", "[FaultList]") {
+  const auto faults = generateForBinaryGate(GateType::Xnor);
+  CHECK(faults.size() == 6);
+  CHECK(totalAtoms(faults) == 12);
+}
+
+TEST_CASE("a BUF gate collapses to 2 fault classes", "[FaultList]") {
+  const auto faults = generateForUnaryGate(GateType::Buf);
+  CHECK(faults.size() == 2);
+  CHECK(totalAtoms(faults) == 8);
+}
+
+TEST_CASE("a NOT gate collapses to 2 fault classes", "[FaultList]") {
+  const auto faults = generateForUnaryGate(GateType::Not);
+  CHECK(faults.size() == 2);
+  CHECK(totalAtoms(faults) == 8);
+}
