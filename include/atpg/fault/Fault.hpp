@@ -35,14 +35,18 @@ struct Fault {
 /// `representative`. A fanout stem's own output fault (a gate driving 2+
 /// readers) is never merged into any branch's class, since it isn't
 /// provably equivalent to any single branch when branches can reconverge
-/// downstream - it's either dropped entirely (when the gate's own input
-/// pins already stand in for it, e.g. And/Nand/Or/Nor/Buf/Not) or kept as
-/// its own class (when nothing does, e.g. a primary input or an
-/// Xor/Xnor gate). Other faults that happen to be locally equivalent to a
-/// dropped stem (e.g. a primary input feeding that gate, or one of the
-/// gate's own input pins) still get their own class, since the checkpoint
-/// theorem requires every primary input and every fanout branch to remain
-/// represented regardless of what it's locally equivalent to.
+/// downstream - each polarity is either dropped entirely, when it was
+/// proven an exact equivalence to one of the gate's own input faults
+/// (e.g. both polarities for Buf/Not, one polarity for
+/// And/Nand/Or/Nor), or kept as its own class otherwise (a primary
+/// input, an Xor/Xnor gate, or the non-equivalence polarity of
+/// And/Nand/Or/Nor - dominance alone isn't enough to drop a fault, since
+/// the dominating fault could itself be redundant). Other faults that
+/// happen to be locally equivalent to a dropped stem polarity (e.g. a
+/// primary input feeding that gate, or one of the gate's own input pins)
+/// still get their own class, since the checkpoint theorem requires every
+/// primary input and every fanout branch to remain represented regardless
+/// of what it's locally equivalent to.
 struct FaultClass {
   Fault representative;
   std::vector<Fault> equivalent;

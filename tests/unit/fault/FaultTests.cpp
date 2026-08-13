@@ -287,15 +287,17 @@ TEST_CASE("c17's fault list covers every atomic fault exactly once", "[FaultList
   const FaultList faults = generateFaultList(graph);
 
   // 5 PIs x 2 + 6 NAND gates x 6 + 2 POs x 2 = 50 atomic faults. n3, n11
-  // and n16 are the fanout-2 stems. n11 and n16 are Nand-typed, so phase
-  // 1 already proved a dominating fault among their own input pins for
-  // each output polarity - their bare output atoms (4 total) are dropped,
-  // and nothing else: their input pins survive as their own class, since
-  // they're themselves fanout-branch checkpoints (e.g. n11's connection
-  // to n3) the checkpoint theorem requires to stay represented. n3 is a
-  // Pi, with no input pins for phase 1 to dominate its output with, so
-  // its 2 atoms are kept rather than dropped. Total dropped: 4, not 6.
-  CHECK(totalAtoms(faults) == 46);
+  // and n16 are the fanout-2 stems. n11 and n16 are Nand-typed, so phase 1
+  // already proved output/SA1 an exact equivalence with their own
+  // input/SA0 faults - only that one polarity's bare output atom (1 per
+  // gate, 2 total) is dropped; output/SA0 is only dominated (not exactly
+  // equivalent) by their input/SA1 faults, so it's kept as its own class.
+  // Their input pins also survive as their own class, since they're
+  // themselves fanout-branch checkpoints (e.g. n11's connection to n3)
+  // the checkpoint theorem requires to stay represented. n3 is a Pi, with
+  // no input pins for phase 1 to be equivalent to, so its 2 atoms are
+  // kept rather than dropped. Total dropped: 2, not 6.
+  CHECK(totalAtoms(faults) == 48);
   CHECK(allFaultsDistinct(faults));
 }
 
@@ -407,23 +409,30 @@ TEST_CASE("a locally-fused stem drops only its own output atoms, not the "
 
   const FaultList faults = generateFaultList(graph);
 
-  CHECK(faults.size() == 13);
-  CHECK(totalAtoms(faults) == 32);
+  CHECK(faults.size() == 14);
+  CHECK(totalAtoms(faults) == 33);
   CHECK(allFaultsDistinct(faults));
 
-  // g's bare output atoms - the stem's own fault - must never appear.
-  const std::vector<Fault> mustBeAbsent = {
-      Fault{PinRef{g, PinKind::Output, 0}, StuckValue::SA0},
-      Fault{PinRef{g, PinKind::Output, 0}, StuckValue::SA1},
-  };
-  for (const auto& absent : mustBeAbsent) {
-    for (const auto& faultClass : faults) {
-      CHECK_FALSE(faultClass.representative == absent);
-      for (const auto& equiv : faultClass.equivalent) {
-        CHECK_FALSE(equiv == absent);
-      }
+  // g is a Nand: mergeAllInputs(SA0, SA1) makes output/SA1 an exact
+  // equivalence with g's own input/SA0 faults, so only that polarity of
+  // the stem's own bare output atom is dropped.
+  const Fault gOutSA1{PinRef{g, PinKind::Output, 0}, StuckValue::SA1};
+  for (const auto& faultClass : faults) {
+    CHECK_FALSE(faultClass.representative == gOutSA1);
+    for (const auto& equiv : faultClass.equivalent) {
+      CHECK_FALSE(equiv == gOutSA1);
     }
   }
+
+  // output/SA0 has no exact equivalence (it's only dominated by g's
+  // input/SA1 faults, which could themselves be redundant), so it's kept
+  // as its own class rather than dropped.
+  const Fault gOutSA0{PinRef{g, PinKind::Output, 0}, StuckValue::SA0};
+  bool foundGOutSA0 = false;
+  for (const auto& faultClass : faults) {
+    foundGOutSA0 = foundGOutSA0 || faultClass.representative == gOutSA0;
+  }
+  CHECK(foundGOutSA0);
 
   // g's input pins (locally fused, via NAND's controlling-value rule, with
   // g's now-dropped output/SA1) and a/b's output faults (each has fanout
