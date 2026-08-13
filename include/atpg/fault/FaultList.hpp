@@ -26,9 +26,14 @@ private:
   std::vector<FaultClass> classes_;
 };
 
-/// Enumerates every stuck-at fault in `graph` and collapses them via local
-/// per-gate equivalence and the checkpoint theorem. See
-/// docs/superpowers/specs/2026-08-13-fault-list-design.md for the algorithm.
+/// Enumerates every stuck-at fault in `graph` and collapses them in two
+/// phases: local per-gate equivalence (e.g. an And gate's output SA0 and
+/// every input's SA0 are the same fault), then the checkpoint theorem
+/// (a fanout-1 gate's output fault is merged into its sole reader's input
+/// fault; a fanout>=2 stem's own output fault is dropped rather than
+/// merged into any one branch, since that would be unsound whenever
+/// branches reconverge downstream - every branch remains its own
+/// checkpoint). See `src/fault/FaultList.cpp` for the implementation.
 FaultList generateFaultList(const ir::Graph& graph);
 
 } // namespace atpg::fault

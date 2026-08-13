@@ -274,13 +274,15 @@ TEST_CASE("c17's fault list covers every atomic fault exactly once", "[FaultList
   auto graph = buildTestGraphFromFile(std::string(ATPG_TEST_DATA_DIR) + "/c17.sv", "c17");
   const FaultList faults = generateFaultList(graph);
 
-  // 5 PIs x 2 + 6 NAND gates x 6 + 2 POs x 2 = 50 atomic faults, minus stem
-  // faults dropped by the checkpoint theorem: n3, n11 and n16 are fanout-2
-  // stems, and since n11/n16 are NAND-typed, their local phase-1 fusion
-  // pulls their own input atoms (and, transitively, fanout-1 predecessors)
-  // into the excluded equivalence class too, not just their bare output
-  // atoms - see FaultList.cpp's phase 2b.
-  CHECK(totalAtoms(faults) == 38);
+  // 5 PIs x 2 + 6 NAND gates x 6 + 2 POs x 2 = 50 atomic faults, minus 6
+  // dropped stem-output atoms: n3, n11 and n16 are fanout-2 stems, and
+  // exactly their own 2 output atoms (SA0, SA1) are dropped each - nothing
+  // else, even when (as for the n11/n16 NAND gates) phase 1's local fusion
+  // puts a stem's output atom in the same equivalence class as its own
+  // input pins. Those input pins survive as their own class, since they're
+  // themselves fanout-branch checkpoints (e.g. n11's connection to n3) that
+  // the checkpoint theorem requires to stay represented.
+  CHECK(totalAtoms(faults) == 44);
   CHECK(allFaultsDistinct(faults));
 }
 
@@ -352,7 +354,8 @@ TEST_CASE("a stem feeding a reconvergent fanout is dropped, not merged into a br
   }
 }
 
-TEST_CASE("a locally-fused stem's whole equivalence class is dropped, not just its output pin",
+TEST_CASE("a locally-fused stem drops only its own output atoms, not the "
+         "checkpoints it shares a class with",
          "[FaultList]") {
   // a -\           /- h1 (And, with c) -\
   //     G (Nand)  <                       y (Xor) -> out
@@ -380,21 +383,14 @@ TEST_CASE("a locally-fused stem's whole equivalence class is dropped, not just i
 
   const FaultList faults = generateFaultList(graph);
 
-  CHECK(faults.size() == 12);
-  CHECK(totalAtoms(faults) == 28);
+  CHECK(faults.size() == 13);
+  CHECK(totalAtoms(faults) == 32);
   CHECK(allFaultsDistinct(faults));
 
-  // g's output/SA1 is locally fused (via NAND's controlling-value rule)
-  // with its own input0/SA0 and input1/SA0, which are in turn merged with
-  // a's and b's output faults (a and b each have fanout 1, feeding only
-  // g). All of that must be excluded together, not just g's bare output
-  // atom - this is the exact scenario the fix targets.
+  // g's bare output atoms - the stem's own fault - must never appear.
   const std::vector<Fault> mustBeAbsent = {
+      Fault{PinRef{g, PinKind::Output, 0}, StuckValue::SA0},
       Fault{PinRef{g, PinKind::Output, 0}, StuckValue::SA1},
-      Fault{PinRef{g, PinKind::Input, 0}, StuckValue::SA0},
-      Fault{PinRef{g, PinKind::Input, 1}, StuckValue::SA0},
-      Fault{PinRef{a, PinKind::Output, 0}, StuckValue::SA0},
-      Fault{PinRef{b, PinKind::Output, 0}, StuckValue::SA0},
   };
   for (const auto& absent : mustBeAbsent) {
     for (const auto& faultClass : faults) {
@@ -404,4 +400,17 @@ TEST_CASE("a locally-fused stem's whole equivalence class is dropped, not just i
       }
     }
   }
+
+  // g's input pins (locally fused, via NAND's controlling-value rule, with
+  // g's now-dropped output/SA1) and a/b's output faults (each has fanout
+  // 1, feeding only g) all survive as their own class - they're
+  // checkpoints (primary inputs) sharing a former equivalence with the
+  // dropped stem, not the stem fault itself.
+  const Fault gIn0SA0{PinRef{g, PinKind::Input, 0}, StuckValue::SA0};
+  const Fault gIn1SA0{PinRef{g, PinKind::Input, 1}, StuckValue::SA0};
+  const Fault aSA0{PinRef{a, PinKind::Output, 0}, StuckValue::SA0};
+  const Fault bSA0{PinRef{b, PinKind::Output, 0}, StuckValue::SA0};
+  CHECK(sameClass(faults, gIn0SA0, gIn1SA0));
+  CHECK(sameClass(faults, gIn0SA0, aSA0));
+  CHECK(sameClass(faults, gIn0SA0, bSA0));
 }

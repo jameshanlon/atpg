@@ -119,27 +119,47 @@ FaultList generateFaultList(const ir::Graph& graph) {
   //     fanout-1 gates), regardless of what happens further downstream.
   //   - fanout.size() == 0: dead logic. Keep the output-fault class as its
   //     own class - nothing to merge it into.
-  //   - fanout.size() >= 2: a real fanout branch point (a stem). Do NOT
-  //     merge the stem into any branch - drop it entirely instead, and
-  //     leave every branch as its own independent class. Merging into one
-  //     arbitrarily-chosen branch is unsound whenever branches reconverge
-  //     downstream: a test that detects the branch fault does not
-  //     necessarily detect the stem fault, since propagating through every
-  //     branch simultaneously (what the stem fault does) can be cancelled
-  //     at the reconvergence point in ways propagating through a single
-  //     branch (the branch fault) is not. See the design doc for the full
-  //     argument.
+  //   - fanout.size() >= 2: a real fanout branch point (a stem). Drop the
+  //     stem's own two output atoms - do not merge them into any branch,
+  //     and do not exclude the rest of whatever equivalence class they
+  //     might belong to. Merging a stem into one arbitrarily-chosen branch
+  //     is unsound whenever branches reconverge downstream (a test that
+  //     detects the branch fault doesn't necessarily detect the stem
+  //     fault - propagating through every branch at once, what the stem
+  //     fault does, can be cancelled at the reconvergence point in ways
+  //     propagating through a single branch is not - see the design doc).
+  //     But phase 1's local equivalence can place a stem's output atom in
+  //     the same class as other atoms - the gate's own input pins on the
+  //     controlling-value side, and transitively any fanout-1 predecessor
+  //     chained into them - that are themselves checkpoints (primary
+  //     inputs or *other* fanout branches) and must remain represented:
+  //     the checkpoint theorem requires every primary input and every
+  //     fanout branch to have a surviving fault class regardless of what
+  //     it happens to be locally equivalent to. So only the stem's own
+  //     bare output atoms are dropped; every other member of whatever
+  //     class they belonged to survives.
   //
-  // Known limitation: if a single gate reads the same net on more than one
-  // of its own input pins (e.g. `and(y, a, a);`), the fanout.size()==1
-  // case's std::find always resolves to that net's *first* matching input
-  // pin, since Gate::fanin doesn't record which edge produced which entry.
+  // (A net read on more than one of a single gate's own input pins, e.g.
+  // `and(y, a, a);`, gives that net's driver fanout.size() >= 2 - it goes
+  // through the stem case above, not the single-edge fanout==1 case below,
+  // so std::find there is never asked to disambiguate between edges to the
+  // same consumer.)
 
-  // Pass 2a: merge every fanout==1 gate into its consumer. Fanout>=2 (stem)
-  // and fanout==0 (dead) gates are untouched here - handled in pass 2b.
+  std::vector<bool> isStemFault(atoms.size(), false);
+
   for (std::size_t g = 0; g < graph.size(); ++g) {
     const ir::Gate& gate = graph.gate(static_cast<ir::GateId>(g));
-    if (gate.type == ir::GateType::Po || gate.fanout.size() != 1) {
+    if (gate.type == ir::GateType::Po) {
+      continue;
+    }
+
+    if (gate.fanout.size() >= 2) {
+      isStemFault[outIdx(gate.id, StuckValue::SA0)] = true;
+      isStemFault[outIdx(gate.id, StuckValue::SA1)] = true;
+      continue;
+    }
+
+    if (gate.fanout.empty()) {
       continue;
     }
 
@@ -154,36 +174,14 @@ FaultList generateFaultList(const ir::Graph& graph) {
     uf.unite(outIdx(gate.id, StuckValue::SA1), inIdx(consumer, pin, StuckValue::SA1));
   }
 
-  // Pass 2b: now that every fanout==1 merge from pass 2a is final, exclude
-  // the whole final equivalence class rooted at each fanout>=2 stem's
-  // output - not just the bare output atom. A stem's output atom is often
-  // already unioned (via phase 1's controlling-value rule, or transitively
-  // through an upstream fanout-1 predecessor merged in by pass 2a) with
-  // other atoms that are electrically the identical defect. Those atoms
-  // carry the exact same reconvergence-masking risk as the output atom
-  // itself and must be dropped together. This must run after pass 2a, not
-  // interleaved with it or before it, so uf.find() here returns the final,
-  // stable root rather than one that a later union in pass 2a could still
-  // change.
-  std::vector<bool> excludedRoot(atoms.size(), false);
-  for (std::size_t g = 0; g < graph.size(); ++g) {
-    const ir::Gate& gate = graph.gate(static_cast<ir::GateId>(g));
-    if (gate.type == ir::GateType::Po || gate.fanout.size() < 2) {
-      continue;
-    }
-    excludedRoot[uf.find(outIdx(gate.id, StuckValue::SA0))] = true;
-    excludedRoot[uf.find(outIdx(gate.id, StuckValue::SA1))] = true;
-  }
-
   // -- materialize collapsed classes ---------------------------------------
 
   std::vector<std::vector<std::size_t>> membersByRoot(atoms.size());
   for (std::size_t i = 0; i < atoms.size(); ++i) {
-    const std::size_t root = uf.find(i);
-    if (excludedRoot[root]) {
+    if (isStemFault[i]) {
       continue;
     }
-    membersByRoot[root].push_back(i);
+    membersByRoot[uf.find(i)].push_back(i);
   }
 
   FaultList result;
