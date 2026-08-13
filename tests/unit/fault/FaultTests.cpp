@@ -274,9 +274,13 @@ TEST_CASE("c17's fault list covers every atomic fault exactly once", "[FaultList
   auto graph = buildTestGraphFromFile(std::string(ATPG_TEST_DATA_DIR) + "/c17.sv", "c17");
   const FaultList faults = generateFaultList(graph);
 
-  // 5 PIs x 2 + 6 NAND gates x 6 + 2 POs x 2 = 50 atomic faults, minus 6
-  // dropped stem faults (n3 and two internal NAND outputs have fanout 2).
-  CHECK(totalAtoms(faults) == 44);
+  // 5 PIs x 2 + 6 NAND gates x 6 + 2 POs x 2 = 50 atomic faults, minus stem
+  // faults dropped by the checkpoint theorem: n3, n11 and n16 are fanout-2
+  // stems, and since n11/n16 are NAND-typed, their local phase-1 fusion
+  // pulls their own input atoms (and, transitively, fanout-1 predecessors)
+  // into the excluded equivalence class too, not just their bare output
+  // atoms - see FaultList.cpp's phase 2b.
+  CHECK(totalAtoms(faults) == 38);
   CHECK(allFaultsDistinct(faults));
 }
 
@@ -344,6 +348,60 @@ TEST_CASE("a stem feeding a reconvergent fanout is dropped, not merged into a br
     for (const auto& equiv : faultClass.equivalent) {
       CHECK_FALSE(equiv == stemSA0);
       CHECK_FALSE(equiv == stemSA1);
+    }
+  }
+}
+
+TEST_CASE("a locally-fused stem's whole equivalence class is dropped, not just its output pin",
+         "[FaultList]") {
+  // a -\           /- h1 (And, with c) -\
+  //     G (Nand)  <                       y (Xor) -> out
+  // b -/           \- h2 (And, with d) -/
+  Graph graph;
+  const GateId a = graph.addGate(GateType::Pi, "a");
+  const GateId b = graph.addGate(GateType::Pi, "b");
+  const GateId c = graph.addGate(GateType::Pi, "c");
+  const GateId d = graph.addGate(GateType::Pi, "d");
+  const GateId g = graph.addGate(GateType::Nand, "g");
+  const GateId h1 = graph.addGate(GateType::And, "h1");
+  const GateId h2 = graph.addGate(GateType::And, "h2");
+  const GateId y = graph.addGate(GateType::Xor, "y");
+  const GateId out = graph.addGate(GateType::Po, "out");
+  graph.addEdge(a, g);
+  graph.addEdge(b, g);
+  graph.addEdge(g, h1);
+  graph.addEdge(c, h1);
+  graph.addEdge(g, h2);
+  graph.addEdge(d, h2);
+  graph.addEdge(h1, y);
+  graph.addEdge(h2, y);
+  graph.addEdge(y, out);
+  REQUIRE(graph.levelize().ok());
+
+  const FaultList faults = generateFaultList(graph);
+
+  CHECK(faults.size() == 12);
+  CHECK(totalAtoms(faults) == 28);
+  CHECK(allFaultsDistinct(faults));
+
+  // g's output/SA1 is locally fused (via NAND's controlling-value rule)
+  // with its own input0/SA0 and input1/SA0, which are in turn merged with
+  // a's and b's output faults (a and b each have fanout 1, feeding only
+  // g). All of that must be excluded together, not just g's bare output
+  // atom - this is the exact scenario the fix targets.
+  const std::vector<Fault> mustBeAbsent = {
+      Fault{PinRef{g, PinKind::Output, 0}, StuckValue::SA1},
+      Fault{PinRef{g, PinKind::Input, 0}, StuckValue::SA0},
+      Fault{PinRef{g, PinKind::Input, 1}, StuckValue::SA0},
+      Fault{PinRef{a, PinKind::Output, 0}, StuckValue::SA0},
+      Fault{PinRef{b, PinKind::Output, 0}, StuckValue::SA0},
+  };
+  for (const auto& absent : mustBeAbsent) {
+    for (const auto& faultClass : faults) {
+      CHECK_FALSE(faultClass.representative == absent);
+      for (const auto& equiv : faultClass.equivalent) {
+        CHECK_FALSE(equiv == absent);
+      }
     }
   }
 }
