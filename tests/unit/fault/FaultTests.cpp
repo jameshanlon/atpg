@@ -1,8 +1,40 @@
 #include "atpg/fault/Fault.hpp"
+#include "atpg/fault/FaultList.hpp"
+#include "atpg/ir/Graph.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
 using namespace atpg::fault;
+using namespace atpg::ir;
+
+namespace {
+
+std::size_t totalAtoms(const FaultList& faults) {
+  std::size_t total = 0;
+  for (const auto& faultClass : faults) {
+    total += 1 + faultClass.equivalent.size();
+  }
+  return total;
+}
+
+} // namespace
+
+TEST_CASE("a 2-input AND gate collapses to 4 fault classes", "[FaultList]") {
+  Graph graph;
+  const GateId a = graph.addGate(GateType::Pi, "a");
+  const GateId b = graph.addGate(GateType::Pi, "b");
+  const GateId g = graph.addGate(GateType::And, "g");
+  const GateId y = graph.addGate(GateType::Po, "y");
+  graph.addEdge(a, g);
+  graph.addEdge(b, g);
+  graph.addEdge(g, y);
+  REQUIRE(graph.levelize().ok());
+
+  const FaultList faults = generateFaultList(graph);
+
+  CHECK(faults.size() == 4);
+  CHECK(totalAtoms(faults) == 12);
+}
 
 TEST_CASE("PinRef equality compares all fields", "[Fault]") {
   const PinRef a{5, PinKind::Input, 2};

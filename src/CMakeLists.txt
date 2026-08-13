@@ -3,7 +3,8 @@ add_library(
   ir/Gate.cpp
   ir/Graph.cpp
   frontend/Frontend.cpp
-  sim/LogicSim.cpp)
+  sim/LogicSim.cpp
+  fault/FaultList.cpp)
 
 target_include_directories(atpg-core PUBLIC ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(atpg-core PUBLIC slang::slang PRIVATE fmt::fmt)
