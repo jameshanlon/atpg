@@ -1,6 +1,5 @@
 #include "atpg/fault/FaultList.hpp"
 
-#include <algorithm>
 #include <numeric>
 
 namespace atpg::fault {
@@ -39,22 +38,22 @@ private:
 FaultList generateFaultList(const ir::Graph& graph) {
   // -- enumerate atomic faults, with O(1) index lookup per pin+value ------
 
+  // gateBase[g] is the atom index of gate g's output/SA0 (or, for a Po
+  // with no output atoms, its input/0/SA0) - every other atom for g sits
+  // at a fixed offset from it, computed in outIdx/inIdx below.
   std::vector<Fault> atoms;
-  std::vector<std::size_t> outputSA0(graph.size());
-  std::vector<std::vector<std::size_t>> inputSA0(graph.size());
+  std::vector<std::size_t> gateBase(graph.size());
 
   for (std::size_t g = 0; g < graph.size(); ++g) {
     const ir::Gate& gate = graph.gate(static_cast<ir::GateId>(g));
+    gateBase[g] = atoms.size();
 
     if (gate.type != ir::GateType::Po) {
-      outputSA0[g] = atoms.size();
       atoms.push_back(Fault{PinRef{gate.id, PinKind::Output, 0}, StuckValue::SA0});
       atoms.push_back(Fault{PinRef{gate.id, PinKind::Output, 0}, StuckValue::SA1});
     }
 
-    inputSA0[g].resize(gate.fanin.size());
     for (std::size_t i = 0; i < gate.fanin.size(); ++i) {
-      inputSA0[g][i] = atoms.size();
       atoms.push_back(Fault{PinRef{gate.id, PinKind::Input, i}, StuckValue::SA0});
       atoms.push_back(Fault{PinRef{gate.id, PinKind::Input, i}, StuckValue::SA1});
     }
@@ -63,10 +62,11 @@ FaultList generateFaultList(const ir::Graph& graph) {
   UnionFind uf(atoms.size());
 
   auto outIdx = [&](ir::GateId g, StuckValue v) {
-    return outputSA0[g] + (v == StuckValue::SA1 ? 1 : 0);
+    return gateBase[g] + (v == StuckValue::SA1 ? 1 : 0);
   };
   auto inIdx = [&](ir::GateId g, std::size_t pin, StuckValue v) {
-    return inputSA0[g][pin] + (v == StuckValue::SA1 ? 1 : 0);
+    const std::size_t base = gateBase[g] + (graph.gate(g).type != ir::GateType::Po ? 2 : 0);
+    return base + 2 * pin + (v == StuckValue::SA1 ? 1 : 0);
   };
 
   // -- phase 1: local per-gate equivalence ---------------------------------
@@ -85,8 +85,8 @@ FaultList generateFaultList(const ir::Graph& graph) {
     // A gate with no inputs has nothing to be equivalent to, regardless of
     // type. The SV frontend never produces a gate primitive with 0 fanin,
     // so this never triggers today - but skipping it would both mark a
-    // false equivalence and, for Buf/Not, read out of bounds from an
-    // empty input-pin array below.
+    // false equivalence and read out of bounds from an empty input-pin
+    // array below.
     auto mergeAllInputs = [&](StuckValue inputValue, StuckValue outputValue) {
       if (n == 0) {
         return;
@@ -111,22 +111,12 @@ FaultList generateFaultList(const ir::Graph& graph) {
         mergeAllInputs(StuckValue::SA1, StuckValue::SA0);
         break;
       case ir::GateType::Buf:
-        if (n == 0) {
-          break;
-        }
-        outputIsEquivalence[outIdx(gate.id, StuckValue::SA0)] = true;
-        outputIsEquivalence[outIdx(gate.id, StuckValue::SA1)] = true;
-        uf.unite(inIdx(gate.id, 0, StuckValue::SA0), outIdx(gate.id, StuckValue::SA0));
-        uf.unite(inIdx(gate.id, 0, StuckValue::SA1), outIdx(gate.id, StuckValue::SA1));
+        mergeAllInputs(StuckValue::SA0, StuckValue::SA0);
+        mergeAllInputs(StuckValue::SA1, StuckValue::SA1);
         break;
       case ir::GateType::Not:
-        if (n == 0) {
-          break;
-        }
-        outputIsEquivalence[outIdx(gate.id, StuckValue::SA0)] = true;
-        outputIsEquivalence[outIdx(gate.id, StuckValue::SA1)] = true;
-        uf.unite(inIdx(gate.id, 0, StuckValue::SA1), outIdx(gate.id, StuckValue::SA0));
-        uf.unite(inIdx(gate.id, 0, StuckValue::SA0), outIdx(gate.id, StuckValue::SA1));
+        mergeAllInputs(StuckValue::SA1, StuckValue::SA0);
+        mergeAllInputs(StuckValue::SA0, StuckValue::SA1);
         break;
       case ir::GateType::Xor:
       case ir::GateType::Xnor:
@@ -181,8 +171,8 @@ FaultList generateFaultList(const ir::Graph& graph) {
   // (A net read on more than one of a single gate's own input pins, e.g.
   // `and(y, a, a);`, gives that net's driver fanout.size() >= 2 - it goes
   // through the stem case above, not the single-edge fanout==1 case below,
-  // so std::find there is never asked to disambiguate between edges to the
-  // same consumer.)
+  // so Graph::inputIndex there is never asked to disambiguate between
+  // edges to the same consumer.)
 
   std::vector<bool> isStemFault(atoms.size(), false);
 
@@ -205,11 +195,7 @@ FaultList generateFaultList(const ir::Graph& graph) {
     }
 
     const ir::GateId consumer = gate.fanout[0];
-    const auto& consumerFanin = graph.gate(consumer).fanin;
-    // Graph::addEdge always keeps fanin/fanout in sync, so `it` is never
-    // consumerFanin.end() here.
-    const auto it = std::find(consumerFanin.begin(), consumerFanin.end(), gate.id);
-    const std::size_t pin = static_cast<std::size_t>(it - consumerFanin.begin());
+    const std::size_t pin = graph.inputIndex(consumer, gate.id);
 
     uf.unite(outIdx(gate.id, StuckValue::SA0), inIdx(consumer, pin, StuckValue::SA0));
     uf.unite(outIdx(gate.id, StuckValue::SA1), inIdx(consumer, pin, StuckValue::SA1));

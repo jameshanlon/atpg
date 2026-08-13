@@ -1,5 +1,7 @@
 #include "atpg/ir/Graph.hpp"
 
+#include <algorithm>
+
 namespace atpg::ir {
 
 GateId Graph::addGate(GateType type, std::string name) {
@@ -23,6 +25,12 @@ GateId Graph::addGate(GateType type, std::string name) {
 void Graph::addEdge(GateId from, GateId to) {
   gates_[from].fanout.push_back(to);
   gates_[to].fanin.push_back(from);
+}
+
+std::size_t Graph::inputIndex(GateId consumer, GateId driver) const {
+  const auto& fanin = gates_[consumer].fanin;
+  const auto it = std::find(fanin.begin(), fanin.end(), driver);
+  return static_cast<std::size_t>(it - fanin.begin());
 }
 
 Status Graph::levelize() {

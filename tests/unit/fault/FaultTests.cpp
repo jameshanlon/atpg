@@ -274,12 +274,6 @@ bool sameClass(const FaultList& faults, const Fault& x, const Fault& y) {
   return false;
 }
 
-std::size_t pinIndexOf(const Graph& graph, GateId consumer, GateId driver) {
-  const auto& fanin = graph.gate(consumer).fanin;
-  const auto it = std::find(fanin.begin(), fanin.end(), driver);
-  return static_cast<std::size_t>(it - fanin.begin());
-}
-
 } // namespace
 
 TEST_CASE("c17's fault list covers every atomic fault exactly once", "[FaultList]") {
@@ -308,7 +302,7 @@ TEST_CASE("c17's n1 output fault is equivalent to its consumer's input fault", "
   const GateId n1 = findGate(graph, "n1");
   REQUIRE(graph.gate(n1).fanout.size() == 1);
   const GateId consumer = graph.gate(n1).fanout[0];
-  const std::size_t pin = pinIndexOf(graph, consumer, n1);
+  const std::size_t pin = graph.inputIndex(consumer, n1);
 
   const Fault n1Out{PinRef{n1, PinKind::Output, 0}, StuckValue::SA0};
   const Fault consumerIn{PinRef{consumer, PinKind::Input, pin}, StuckValue::SA0};
@@ -324,9 +318,9 @@ TEST_CASE("c17's n3 fanout branches are not merged with each other", "[FaultList
   const GateId consumer0 = graph.gate(n3).fanout[0];
   const GateId consumer1 = graph.gate(n3).fanout[1];
 
-  const Fault firstBranch{PinRef{consumer0, PinKind::Input, pinIndexOf(graph, consumer0, n3)},
+  const Fault firstBranch{PinRef{consumer0, PinKind::Input, graph.inputIndex(consumer0, n3)},
                           StuckValue::SA0};
-  const Fault secondBranch{PinRef{consumer1, PinKind::Input, pinIndexOf(graph, consumer1, n3)},
+  const Fault secondBranch{PinRef{consumer1, PinKind::Input, graph.inputIndex(consumer1, n3)},
                            StuckValue::SA0};
   CHECK_FALSE(sameClass(faults, firstBranch, secondBranch));
 }

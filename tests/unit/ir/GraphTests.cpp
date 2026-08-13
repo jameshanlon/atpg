@@ -71,3 +71,18 @@ TEST_CASE("addGate registers Pi/Po gates automatically", "[Graph]") {
   REQUIRE(graph.primaryOutputs().size() == 1);
   CHECK(graph.primaryOutputs()[0] == po);
 }
+
+TEST_CASE("inputIndex returns the fanin slot a driver occupies", "[Graph]") {
+  Graph graph;
+  const GateId a = graph.addGate(GateType::Pi, "a");
+  const GateId b = graph.addGate(GateType::Pi, "b");
+  const GateId c = graph.addGate(GateType::Pi, "c");
+  const GateId g = graph.addGate(GateType::And, "g");
+  graph.addEdge(a, g);
+  graph.addEdge(b, g);
+  graph.addEdge(c, g);
+
+  CHECK(graph.inputIndex(g, a) == 0);
+  CHECK(graph.inputIndex(g, b) == 1);
+  CHECK(graph.inputIndex(g, c) == 2);
+}

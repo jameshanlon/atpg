@@ -20,6 +20,11 @@ public:
   /// input pin.
   void addEdge(GateId from, GateId to);
 
+  /// Returns the index into `gate(consumer).fanin` at which `driver`
+  /// appears. `driver` must be one of `consumer`'s fanin (e.g. via a prior
+  /// addEdge(driver, consumer) call).
+  std::size_t inputIndex(GateId consumer, GateId driver) const;
+
   /// Assigns levels to every gate (primary inputs are level 0, every other
   /// gate is one more than the maximum level of its fanin) and computes a
   /// topological evaluation order. Fails if the graph contains a
