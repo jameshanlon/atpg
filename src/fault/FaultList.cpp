@@ -119,31 +119,64 @@ FaultList generateFaultList(const ir::Graph& graph) {
   //     fanout-1 gates), regardless of what happens further downstream.
   //   - fanout.size() == 0: dead logic. Keep the output-fault class as its
   //     own class - nothing to merge it into.
-  //   - fanout.size() >= 2: a real fanout branch point (a stem). Drop the
-  //     stem's own two output atoms - do not merge them into any branch,
-  //     and do not exclude the rest of whatever equivalence class they
-  //     might belong to. Merging a stem into one arbitrarily-chosen branch
-  //     is unsound whenever branches reconverge downstream (a test that
-  //     detects the branch fault doesn't necessarily detect the stem
-  //     fault - propagating through every branch at once, what the stem
-  //     fault does, can be cancelled at the reconvergence point in ways
-  //     propagating through a single branch is not - see the design doc).
-  //     But phase 1's local equivalence can place a stem's output atom in
-  //     the same class as other atoms - the gate's own input pins on the
-  //     controlling-value side, and transitively any fanout-1 predecessor
-  //     chained into them - that are themselves checkpoints (primary
-  //     inputs or *other* fanout branches) and must remain represented:
-  //     the checkpoint theorem requires every primary input and every
-  //     fanout branch to have a surviving fault class regardless of what
-  //     it happens to be locally equivalent to. So only the stem's own
-  //     bare output atoms are dropped; every other member of whatever
-  //     class they belonged to survives.
+  //   - fanout.size() >= 2: a real fanout branch point (a stem). Merging
+  //     the stem into one arbitrarily-chosen branch is unsound whenever
+  //     branches reconverge downstream (a test that detects the branch
+  //     fault doesn't necessarily detect the stem fault - propagating
+  //     through every branch at once, what the stem fault does, can be
+  //     cancelled at the reconvergence point in ways propagating through a
+  //     single branch is not - see the design doc). So the stem is never
+  //     merged into a branch. Whether its own output atoms can be safely
+  //     *dropped* instead (rather than kept as their own class) depends on
+  //     the gate's function: dropping is only sound when phase 1 already
+  //     proved a *dominating* fault exists among the gate's own input
+  //     pins for each output polarity - e.g. a Nand's output/SA1 is
+  //     exactly equivalent to any of its input/SA0 faults (which survive,
+  //     since only the stem's bare output atom is dropped, not the whole
+  //     class - see below), and its output/SA0 is dominated by any
+  //     input/SA1 fault (every test that detects an input/SA1 also
+  //     detects output/SA0, since forcing one input to the non-controlling
+  //     value with the others at the controlling value produces the exact
+  //     same wrong output either way). And/Or/Nor/Buf/Not have the same
+  //     property. A Pi has no input pins at all, and Xor/Xnor have no
+  //     controlling value for either polarity to dominate off of - for
+  //     those, nothing survives to stand in for the stem's own fault, so
+  //     dropping it would silently lose a checkpoint with no
+  //     representative left anywhere. Those two output atoms are instead
+  //     kept as their own class, exactly like a fanout==0 gate's.
+  //
+  //     For gate types where dropping is sound: only the stem's own bare
+  //     output atoms are dropped, never the rest of whatever class phase 1
+  //     placed them in - that class typically also contains the gate's own
+  //     input pins, and transitively any fanout-1 predecessor chained into
+  //     them, which are themselves checkpoints (primary inputs or *other*
+  //     fanout branches) that the checkpoint theorem requires to remain
+  //     represented regardless of what they happen to be locally
+  //     equivalent to.
   //
   // (A net read on more than one of a single gate's own input pins, e.g.
   // `and(y, a, a);`, gives that net's driver fanout.size() >= 2 - it goes
   // through the stem case above, not the single-edge fanout==1 case below,
   // so std::find there is never asked to disambiguate between edges to the
   // same consumer.)
+
+  auto stemDropIsSound = [](ir::GateType type) {
+    switch (type) {
+      case ir::GateType::And:
+      case ir::GateType::Nand:
+      case ir::GateType::Or:
+      case ir::GateType::Nor:
+      case ir::GateType::Buf:
+      case ir::GateType::Not:
+        return true;
+      case ir::GateType::Xor:
+      case ir::GateType::Xnor:
+      case ir::GateType::Pi:
+      case ir::GateType::Po:
+        return false;
+    }
+    return false;
+  };
 
   std::vector<bool> isStemFault(atoms.size(), false);
 
@@ -154,8 +187,10 @@ FaultList generateFaultList(const ir::Graph& graph) {
     }
 
     if (gate.fanout.size() >= 2) {
-      isStemFault[outIdx(gate.id, StuckValue::SA0)] = true;
-      isStemFault[outIdx(gate.id, StuckValue::SA1)] = true;
+      if (stemDropIsSound(gate.type)) {
+        isStemFault[outIdx(gate.id, StuckValue::SA0)] = true;
+        isStemFault[outIdx(gate.id, StuckValue::SA1)] = true;
+      }
       continue;
     }
 

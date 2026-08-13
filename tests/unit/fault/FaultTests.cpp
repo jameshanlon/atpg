@@ -164,8 +164,12 @@ TEST_CASE("fanout branches through NOT gates stay independent", "[FaultList]") {
 
   const FaultList faults = generateFaultList(graph);
 
-  CHECK(faults.size() == 4);
-  CHECK(totalAtoms(faults) == 12);
+  // a is a Pi with fanout 2: nothing among its own (nonexistent) input
+  // pins can dominate its output faults, so they're kept as their own
+  // class rather than dropped - 2 extra atoms/classes versus a
+  // hypothetical dominance-backed stem.
+  CHECK(faults.size() == 6);
+  CHECK(totalAtoms(faults) == 14);
 }
 
 TEST_CASE("a gate with no fanout keeps its own fault class", "[FaultList]") {
@@ -185,8 +189,11 @@ TEST_CASE("a gate with no fanout keeps its own fault class", "[FaultList]") {
 
   const FaultList faults = generateFaultList(graph);
 
-  CHECK(faults.size() == 6);
-  CHECK(totalAtoms(faults) == 14);
+  // a is a Pi with fanout 2 (feeds both dead and live): its faults are
+  // kept as their own class rather than dropped, same reasoning as the
+  // fanout-branch test above.
+  CHECK(faults.size() == 8);
+  CHECK(totalAtoms(faults) == 16);
 
   const Fault deadOutputSA1{PinRef{dead, PinKind::Output, 0}, StuckValue::SA1};
   const bool hasUntestableSingleton = std::any_of(
@@ -196,7 +203,7 @@ TEST_CASE("a gate with no fanout keeps its own fault class", "[FaultList]") {
   CHECK(hasUntestableSingleton);
 }
 
-TEST_CASE("a half adder collapses to 10 fault classes", "[FaultList]") {
+TEST_CASE("a half adder collapses to 14 fault classes", "[FaultList]") {
   auto graph = buildTestGraph(R"(
     module half_adder(input a, input b, output sum, output cout);
       xor(sum, a, b);
@@ -207,8 +214,10 @@ TEST_CASE("a half adder collapses to 10 fault classes", "[FaultList]") {
 
   const FaultList faults = generateFaultList(graph);
 
-  CHECK(faults.size() == 10);
-  CHECK(totalAtoms(faults) == 16);
+  // a and b are Pi's with fanout 2 each (feeding both the xor and the
+  // and): their faults are kept as their own classes rather than dropped.
+  CHECK(faults.size() == 14);
+  CHECK(totalAtoms(faults) == 20);
 }
 
 TEST_CASE("a full adder's fault list covers every atomic fault exactly once", "[FaultList]") {
@@ -226,12 +235,15 @@ TEST_CASE("a full adder's fault list covers every atomic fault exactly once", "[
 
   const FaultList faults = generateFaultList(graph);
 
-  // 3 PIs x 2 + 5 internal 2-input gates x 6 + 2 POs x 2 = 40 atomic faults,
-  // minus 8 dropped stem faults (a, b, cin, x1 each have fanout 2).
-  CHECK(totalAtoms(faults) == 32);
+  // 3 PIs x 2 + 5 internal 2-input gates x 6 + 2 POs x 2 = 40 atomic
+  // faults. a, b, cin (Pi) and x1 (Xor) all have fanout 2, but none of
+  // their gate types have a controlling value for phase 1 to dominate
+  // their output faults with, so none of them are dropped - the full 40
+  // atoms all survive, in fewer than 40 classes (some still merge via the
+  // fanout==1 checkpoint-theorem case).
+  CHECK(totalAtoms(faults) == 40);
   CHECK(allFaultsDistinct(faults));
-  // Collapsing must have merged something.
-  CHECK(faults.size() < 32);
+  CHECK(faults.size() < 40);
 }
 
 namespace {
@@ -274,15 +286,16 @@ TEST_CASE("c17's fault list covers every atomic fault exactly once", "[FaultList
   auto graph = buildTestGraphFromFile(std::string(ATPG_TEST_DATA_DIR) + "/c17.sv", "c17");
   const FaultList faults = generateFaultList(graph);
 
-  // 5 PIs x 2 + 6 NAND gates x 6 + 2 POs x 2 = 50 atomic faults, minus 6
-  // dropped stem-output atoms: n3, n11 and n16 are fanout-2 stems, and
-  // exactly their own 2 output atoms (SA0, SA1) are dropped each - nothing
-  // else, even when (as for the n11/n16 NAND gates) phase 1's local fusion
-  // puts a stem's output atom in the same equivalence class as its own
-  // input pins. Those input pins survive as their own class, since they're
-  // themselves fanout-branch checkpoints (e.g. n11's connection to n3) that
-  // the checkpoint theorem requires to stay represented.
-  CHECK(totalAtoms(faults) == 44);
+  // 5 PIs x 2 + 6 NAND gates x 6 + 2 POs x 2 = 50 atomic faults. n3, n11
+  // and n16 are the fanout-2 stems. n11 and n16 are Nand-typed, so phase
+  // 1 already proved a dominating fault among their own input pins for
+  // each output polarity - their bare output atoms (4 total) are dropped,
+  // and nothing else: their input pins survive as their own class, since
+  // they're themselves fanout-branch checkpoints (e.g. n11's connection
+  // to n3) the checkpoint theorem requires to stay represented. n3 is a
+  // Pi, with no input pins for phase 1 to dominate its output with, so
+  // its 2 atoms are kept rather than dropped. Total dropped: 4, not 6.
+  CHECK(totalAtoms(faults) == 46);
   CHECK(allFaultsDistinct(faults));
 }
 
@@ -316,7 +329,8 @@ TEST_CASE("c17's n3 fanout branches are not merged with each other", "[FaultList
   CHECK_FALSE(sameClass(faults, firstBranch, secondBranch));
 }
 
-TEST_CASE("a stem feeding a reconvergent fanout is dropped, not merged into a branch",
+TEST_CASE("a Pi stem feeding a reconvergent fanout keeps its own fault, "
+         "never merged into a branch",
          "[FaultList]") {
   // stem -> g1 (Not) -\
   //                     g3 (Xor) -> y
@@ -336,22 +350,32 @@ TEST_CASE("a stem feeding a reconvergent fanout is dropped, not merged into a br
 
   const FaultList faults = generateFaultList(graph);
 
-  CHECK(faults.size() == 6);
-  CHECK(totalAtoms(faults) == 16);
+  // stem is a Pi: it has no input pins for phase 1 to dominate its output
+  // faults with, so - unlike a Nand/And/Or/Nor/Buf/Not stem - its faults
+  // are kept as their own class rather than dropped.
+  CHECK(faults.size() == 8);
+  CHECK(totalAtoms(faults) == 18);
   CHECK(allFaultsDistinct(faults));
 
-  // The stem's own fault must not appear anywhere - neither as a
-  // representative nor as an equivalent member of any class.
+  // The stem's own fault must appear (as its own class - nothing merges
+  // into a Pi, so it's a singleton), but must never share a class with
+  // either branch's fault: that's exactly the reconvergence-masking risk
+  // this whole fix targets.
   const Fault stemSA0{PinRef{stem, PinKind::Output, 0}, StuckValue::SA0};
   const Fault stemSA1{PinRef{stem, PinKind::Output, 0}, StuckValue::SA1};
+  bool foundSA0 = false;
+  bool foundSA1 = false;
   for (const auto& faultClass : faults) {
-    CHECK_FALSE(faultClass.representative == stemSA0);
-    CHECK_FALSE(faultClass.representative == stemSA1);
-    for (const auto& equiv : faultClass.equivalent) {
-      CHECK_FALSE(equiv == stemSA0);
-      CHECK_FALSE(equiv == stemSA1);
-    }
+    foundSA0 = foundSA0 || faultClass.representative == stemSA0;
+    foundSA1 = foundSA1 || faultClass.representative == stemSA1;
   }
+  CHECK(foundSA0);
+  CHECK(foundSA1);
+
+  const Fault g1InSA1{PinRef{g1, PinKind::Input, 0}, StuckValue::SA1};
+  const Fault g2InSA1{PinRef{g2, PinKind::Input, 0}, StuckValue::SA1};
+  CHECK_FALSE(sameClass(faults, stemSA1, g1InSA1));
+  CHECK_FALSE(sameClass(faults, stemSA1, g2InSA1));
 }
 
 TEST_CASE("a locally-fused stem drops only its own output atoms, not the "
