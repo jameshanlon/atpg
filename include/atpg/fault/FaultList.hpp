@@ -14,7 +14,7 @@ public:
   void add(FaultClass faultClass) { classes_.push_back(std::move(faultClass)); }
 
   std::size_t size() const { return classes_.size(); }
-  const FaultClass& at(std::size_t index) const { return classes_.at(index); }
+  const FaultClass& at(std::size_t index) const { return classes_[index]; } // index must be < size()
 
   std::vector<FaultClass>::const_iterator begin() const { return classes_.begin(); }
   std::vector<FaultClass>::const_iterator end() const { return classes_.end(); }
