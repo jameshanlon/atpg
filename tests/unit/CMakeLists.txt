@@ -3,7 +3,8 @@ add_executable(
   Test.hpp
   ir/GraphTests.cpp
   frontend/FrontendTests.cpp
-  sim/LogicSimTests.cpp)
+  sim/LogicSimTests.cpp
+  fault/FaultTests.cpp)
 
 target_link_libraries(atpg-tests PRIVATE atpg-core slang::slang Catch2::Catch2WithMain)
 target_include_directories(atpg-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
