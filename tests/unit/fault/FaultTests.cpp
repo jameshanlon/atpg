@@ -20,6 +20,24 @@ std::size_t totalAtoms(const FaultList& faults) {
   return total;
 }
 
+bool allFaultsDistinct(const FaultList& faults) {
+  std::vector<Fault> all;
+  for (const auto& faultClass : faults) {
+    all.push_back(faultClass.representative);
+    for (const auto& equiv : faultClass.equivalent) {
+      all.push_back(equiv);
+    }
+  }
+  for (std::size_t i = 0; i < all.size(); ++i) {
+    for (std::size_t j = i + 1; j < all.size(); ++j) {
+      if (all[i] == all[j]) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 } // namespace
 
 TEST_CASE("a 2-input AND gate collapses to 4 fault classes", "[FaultList]") {
@@ -147,7 +165,7 @@ TEST_CASE("fanout branches through NOT gates stay independent", "[FaultList]") {
   const FaultList faults = generateFaultList(graph);
 
   CHECK(faults.size() == 4);
-  CHECK(totalAtoms(faults) == 14);
+  CHECK(totalAtoms(faults) == 12);
 }
 
 TEST_CASE("a gate with no fanout keeps its own fault class", "[FaultList]") {
@@ -168,7 +186,7 @@ TEST_CASE("a gate with no fanout keeps its own fault class", "[FaultList]") {
   const FaultList faults = generateFaultList(graph);
 
   CHECK(faults.size() == 6);
-  CHECK(totalAtoms(faults) == 16);
+  CHECK(totalAtoms(faults) == 14);
 
   const Fault deadOutputSA1{PinRef{dead, PinKind::Output, 0}, StuckValue::SA1};
   const bool hasUntestableSingleton = std::any_of(
@@ -190,7 +208,7 @@ TEST_CASE("a half adder collapses to 10 fault classes", "[FaultList]") {
   const FaultList faults = generateFaultList(graph);
 
   CHECK(faults.size() == 10);
-  CHECK(totalAtoms(faults) == 20);
+  CHECK(totalAtoms(faults) == 16);
 }
 
 TEST_CASE("a full adder's fault list covers every atomic fault exactly once", "[FaultList]") {
@@ -208,10 +226,12 @@ TEST_CASE("a full adder's fault list covers every atomic fault exactly once", "[
 
   const FaultList faults = generateFaultList(graph);
 
-  // 3 PIs x 2 + 5 internal 2-input gates x 6 + 2 POs x 2 = 40 atomic faults.
-  CHECK(totalAtoms(faults) == 40);
+  // 3 PIs x 2 + 5 internal 2-input gates x 6 + 2 POs x 2 = 40 atomic faults,
+  // minus 8 dropped stem faults (a, b, cin, x1 each have fanout 2).
+  CHECK(totalAtoms(faults) == 32);
+  CHECK(allFaultsDistinct(faults));
   // Collapsing must have merged something.
-  CHECK(faults.size() < 40);
+  CHECK(faults.size() < 32);
 }
 
 namespace {
@@ -254,8 +274,10 @@ TEST_CASE("c17's fault list covers every atomic fault exactly once", "[FaultList
   auto graph = buildTestGraphFromFile(std::string(ATPG_TEST_DATA_DIR) + "/c17.sv", "c17");
   const FaultList faults = generateFaultList(graph);
 
-  // 5 PIs x 2 + 6 NAND gates x 6 + 2 POs x 2 = 50 atomic faults.
-  CHECK(totalAtoms(faults) == 50);
+  // 5 PIs x 2 + 6 NAND gates x 6 + 2 POs x 2 = 50 atomic faults, minus 6
+  // dropped stem faults (n3 and two internal NAND outputs have fanout 2).
+  CHECK(totalAtoms(faults) == 44);
+  CHECK(allFaultsDistinct(faults));
 }
 
 TEST_CASE("c17's n1 output fault is equivalent to its consumer's input fault", "[FaultList]") {
@@ -286,4 +308,42 @@ TEST_CASE("c17's n3 fanout branches are not merged with each other", "[FaultList
   const Fault secondBranch{PinRef{consumer1, PinKind::Input, pinIndexOf(graph, consumer1, n3)},
                            StuckValue::SA0};
   CHECK_FALSE(sameClass(faults, firstBranch, secondBranch));
+}
+
+TEST_CASE("a stem feeding a reconvergent fanout is dropped, not merged into a branch",
+         "[FaultList]") {
+  // stem -> g1 (Not) -\
+  //                     g3 (Xor) -> y
+  // stem -> g2 (Not) -/
+  Graph graph;
+  const GateId stem = graph.addGate(GateType::Pi, "stem");
+  const GateId g1 = graph.addGate(GateType::Not, "g1");
+  const GateId g2 = graph.addGate(GateType::Not, "g2");
+  const GateId g3 = graph.addGate(GateType::Xor, "g3");
+  const GateId y = graph.addGate(GateType::Po, "y");
+  graph.addEdge(stem, g1);
+  graph.addEdge(stem, g2);
+  graph.addEdge(g1, g3);
+  graph.addEdge(g2, g3);
+  graph.addEdge(g3, y);
+  REQUIRE(graph.levelize().ok());
+
+  const FaultList faults = generateFaultList(graph);
+
+  CHECK(faults.size() == 6);
+  CHECK(totalAtoms(faults) == 16);
+  CHECK(allFaultsDistinct(faults));
+
+  // The stem's own fault must not appear anywhere - neither as a
+  // representative nor as an equivalent member of any class.
+  const Fault stemSA0{PinRef{stem, PinKind::Output, 0}, StuckValue::SA0};
+  const Fault stemSA1{PinRef{stem, PinKind::Output, 0}, StuckValue::SA1};
+  for (const auto& faultClass : faults) {
+    CHECK_FALSE(faultClass.representative == stemSA0);
+    CHECK_FALSE(faultClass.representative == stemSA1);
+    for (const auto& equiv : faultClass.equivalent) {
+      CHECK_FALSE(equiv == stemSA0);
+      CHECK_FALSE(equiv == stemSA1);
+    }
+  }
 }

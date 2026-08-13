@@ -11,10 +11,13 @@ namespace atpg::fault {
 /// An ordered collection of collapsed fault classes.
 class FaultList {
 public:
+  /// Adds a collapsed fault class to the list.
   void add(FaultClass faultClass) { classes_.push_back(std::move(faultClass)); }
 
+  /// Returns the number of collapsed fault classes.
   std::size_t size() const { return classes_.size(); }
-  const FaultClass& at(std::size_t index) const { return classes_[index]; } // index must be < size()
+  /// Returns the fault class at `index`. `index` must be < size().
+  const FaultClass& at(std::size_t index) const { return classes_[index]; }
 
   std::vector<FaultClass>::const_iterator begin() const { return classes_.begin(); }
   std::vector<FaultClass>::const_iterator end() const { return classes_.end(); }

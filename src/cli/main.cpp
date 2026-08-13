@@ -35,7 +35,8 @@ void writeDot(const atpg::ir::Graph& graph, std::ostream& os) {
 }
 
 std::string describeFault(const atpg::ir::Graph& graph, const atpg::fault::Fault& fault) {
-  const std::string& gateName = graph.gate(fault.pin.gate).name;
+  const atpg::ir::Gate& gate = graph.gate(fault.pin.gate);
+  const std::string gateName = gate.name.empty() ? fmt::format("g{}", gate.id) : gate.name;
   const char* stuck = fault.value == atpg::fault::StuckValue::SA0 ? "SA0" : "SA1";
   if (fault.pin.kind == atpg::fault::PinKind::Output) {
     return fmt::format("{}/out/{}", gateName, stuck);

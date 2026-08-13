@@ -32,7 +32,10 @@ struct Fault {
 /// A collapsed equivalence class of faults. `representative` is the fault
 /// used for test generation and simulation; `equivalent` lists every other
 /// fault proven to be detected by exactly the same test as
-/// `representative` (or, for stem faults, dominated by it).
+/// `representative`. Fanout-stem faults (a gate driving 2+ readers) are
+/// never members of any class - they're dropped, not merged, since a stem
+/// fault isn't provably equivalent to any single branch when branches can
+/// reconverge downstream.
 struct FaultClass {
   Fault representative;
   std::vector<Fault> equivalent;

@@ -112,27 +112,59 @@ FaultList generateFaultList(const ir::Graph& graph) {
 
   // -- phase 2: checkpoint theorem ------------------------------------------
   //
-  // A stem fault (a gate's output, before branching) is the same physical
-  // defect as the corresponding fault on every branch at once, so it's
-  // merged into the first branch's input fault (chasing forward through any
-  // run of fanout-1 gates). Every other branch (fanout index >= 1) stays
-  // independent, since a defect there wouldn't affect its siblings. A gate
-  // with fanout 0 (dead logic) keeps its own class, since there's nothing to
-  // merge it into.
+  // For every gate with an output pin (not Po):
+  //   - fanout.size() == 1: the output net has a single reader, so the
+  //     output fault and that reader's input fault are the same physical
+  //     wire - merge them. Always sound (transitively through a run of
+  //     fanout-1 gates), regardless of what happens further downstream.
+  //   - fanout.size() == 0: dead logic. Keep the output-fault class as its
+  //     own class - nothing to merge it into.
+  //   - fanout.size() >= 2: a real fanout branch point (a stem). Do NOT
+  //     merge the stem into any branch - drop it entirely instead, and
+  //     leave every branch as its own independent class. Merging into one
+  //     arbitrarily-chosen branch is unsound whenever branches reconverge
+  //     downstream: a test that detects the branch fault does not
+  //     necessarily detect the stem fault, since propagating through every
+  //     branch simultaneously (what the stem fault does) can be cancelled
+  //     at the reconvergence point in ways propagating through a single
+  //     branch (the branch fault) is not. See the design doc for the full
+  //     argument.
   //
   // Known limitation: if a single gate reads the same net on more than one
-  // of its own input pins (e.g. `and(y, a, a);`), this loop maps every one
-  // of that net's fanout edges to the *first* matching input pin it finds,
-  // since Gate::fanin doesn't record which edge produced which entry.
+  // of its own input pins (e.g. `and(y, a, a);`), the fanout.size()==1
+  // case's std::find always resolves to that net's *first* matching input
+  // pin, since Gate::fanin doesn't record which edge produced which entry.
+
+  // isStemFault tracks specific atom *indices* (the stem gate's own output
+  // atoms), not union-find roots. A stem's own output atom can end up
+  // sharing a root with other, non-stem atoms - e.g. one of the stem's own
+  // input pins, phase-1-merged into its output by a controlling-value rule
+  // (NAND/AND/OR/NOR), or transitively an upstream fanout-1 predecessor's
+  // output. Those atoms are real, independently testable faults and must
+  // stay in the fault list, so only the literal stem atom may be excluded -
+  // excluding by root would silently drop them too.
+  std::vector<bool> isStemFault(atoms.size(), false);
 
   for (std::size_t g = 0; g < graph.size(); ++g) {
     const ir::Gate& gate = graph.gate(static_cast<ir::GateId>(g));
-    if (gate.type == ir::GateType::Po || gate.fanout.empty()) {
+    if (gate.type == ir::GateType::Po) {
+      continue;
+    }
+
+    if (gate.fanout.size() >= 2) {
+      isStemFault[outIdx(gate.id, StuckValue::SA0)] = true;
+      isStemFault[outIdx(gate.id, StuckValue::SA1)] = true;
+      continue;
+    }
+
+    if (gate.fanout.empty()) {
       continue;
     }
 
     const ir::GateId consumer = gate.fanout[0];
     const auto& consumerFanin = graph.gate(consumer).fanin;
+    // Graph::addEdge always keeps fanin/fanout in sync, so `it` is never
+    // consumerFanin.end() here.
     const auto it = std::find(consumerFanin.begin(), consumerFanin.end(), gate.id);
     const std::size_t pin = static_cast<std::size_t>(it - consumerFanin.begin());
 
@@ -144,6 +176,9 @@ FaultList generateFaultList(const ir::Graph& graph) {
 
   std::vector<std::vector<std::size_t>> membersByRoot(atoms.size());
   for (std::size_t i = 0; i < atoms.size(); ++i) {
+    if (isStemFault[i]) {
+      continue;
+    }
     membersByRoot[uf.find(i)].push_back(i);
   }
 
