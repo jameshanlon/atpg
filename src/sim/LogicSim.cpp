@@ -8,7 +8,7 @@ namespace {
 
 template <typename BinaryOp>
 bool fold(const std::vector<ir::GateId>& fanin, const std::vector<bool>& values, bool identity,
-         bool negate, BinaryOp op) {
+          bool negate, BinaryOp op) {
   bool result = identity;
   for (const ir::GateId in : fanin) {
     result = op(result, values[in]);
@@ -19,17 +19,21 @@ bool fold(const std::vector<ir::GateId>& fanin, const std::vector<bool>& values,
 Result<bool> evaluate(const ir::Gate& gate, const std::vector<bool>& values) {
   switch (gate.type) {
     case ir::GateType::And:
-      return fold(gate.fanin, values, /* identity */ true, /* negate */ false, std::logical_and<>{});
+      return fold(gate.fanin, values, /* identity */ true, /* negate */ false,
+                  std::logical_and<>{});
     case ir::GateType::Nand:
       return fold(gate.fanin, values, /* identity */ true, /* negate */ true, std::logical_and<>{});
     case ir::GateType::Or:
-      return fold(gate.fanin, values, /* identity */ false, /* negate */ false, std::logical_or<>{});
+      return fold(gate.fanin, values, /* identity */ false, /* negate */ false,
+                  std::logical_or<>{});
     case ir::GateType::Nor:
       return fold(gate.fanin, values, /* identity */ false, /* negate */ true, std::logical_or<>{});
     case ir::GateType::Xor:
-      return fold(gate.fanin, values, /* identity */ false, /* negate */ false, std::not_equal_to<>{});
+      return fold(gate.fanin, values, /* identity */ false, /* negate */ false,
+                  std::not_equal_to<>{});
     case ir::GateType::Xnor:
-      return fold(gate.fanin, values, /* identity */ false, /* negate */ true, std::not_equal_to<>{});
+      return fold(gate.fanin, values, /* identity */ false, /* negate */ true,
+                  std::not_equal_to<>{});
     case ir::GateType::Buf:
       return static_cast<bool>(values[gate.fanin[0]]);
     case ir::GateType::Not:

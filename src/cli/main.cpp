@@ -23,7 +23,7 @@ void writeDot(const atpg::ir::Graph& graph, std::ostream& os) {
   for (std::size_t i = 0; i < graph.size(); ++i) {
     const auto& gate = graph.gate(static_cast<atpg::ir::GateId>(i));
     fmt::print(os, "  n{} [label=\"{}\\n{}\"];\n", gate.id, gate.name,
-              atpg::ir::gateTypeName(gate.type));
+               atpg::ir::gateTypeName(gate.type));
   }
   for (std::size_t i = 0; i < graph.size(); ++i) {
     const auto& gate = graph.gate(static_cast<atpg::ir::GateId>(i));
@@ -91,7 +91,7 @@ atpg::Status runStimulus(const atpg::ir::Graph& graph, const std::string& path) 
 
 int main(int argc, char** argv) {
   CLI::App app{"atpg - flattens a gate-level SystemVerilog design (built from SV gate "
-              "primitives) into a combinational gate graph and simulates it"};
+               "primitives) into a combinational gate graph and simulates it"};
   argv = app.ensure_utf8(argv);
 
   std::string file;
@@ -105,10 +105,9 @@ int main(int argc, char** argv) {
       ->check(CLI::ExistingFile);
   app.add_option("--top", top, "Top module name")->required();
   app.add_option("--dump-graph", dumpGraphPath, "Write the flattened gate graph as Graphviz dot");
-  app.add_option("--dump-faults", dumpFaultsPath,
-                "Write the collapsed fault list as plain text");
+  app.add_option("--dump-faults", dumpFaultsPath, "Write the collapsed fault list as plain text");
   app.add_option("--stimulus", stimulusPath,
-                "Read newline-separated 0/1 stimulus vectors and simulate each one");
+                 "Read newline-separated 0/1 stimulus vectors and simulate each one");
 
   // CLI11's App::parse() is the one place in atpg that reports failure via a
   // thrown CLI::ParseError rather than atpg::Status/Result - it has no

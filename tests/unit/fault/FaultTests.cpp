@@ -196,8 +196,8 @@ TEST_CASE("a gate with no fanout keeps its own fault class", "[FaultList]") {
   CHECK(totalAtoms(faults) == 16);
 
   const Fault deadOutputSA1{PinRef{dead, PinKind::Output, 0}, StuckValue::SA1};
-  const bool hasUntestableSingleton = std::any_of(
-      faults.begin(), faults.end(), [&](const FaultClass& faultClass) {
+  const bool hasUntestableSingleton =
+      std::any_of(faults.begin(), faults.end(), [&](const FaultClass& faultClass) {
         return faultClass.representative == deadOutputSA1 && faultClass.equivalent.empty();
       });
   CHECK(hasUntestableSingleton);
@@ -326,8 +326,8 @@ TEST_CASE("c17's n3 fanout branches are not merged with each other", "[FaultList
 }
 
 TEST_CASE("a Pi stem feeding a reconvergent fanout keeps its own fault, "
-         "never merged into a branch",
-         "[FaultList]") {
+          "never merged into a branch",
+          "[FaultList]") {
   // stem -> g1 (Not) -\
   //                     g3 (Xor) -> y
   // stem -> g2 (Not) -/
@@ -376,8 +376,8 @@ TEST_CASE("a Pi stem feeding a reconvergent fanout keeps its own fault, "
 }
 
 TEST_CASE("a locally-fused stem drops only its own output atoms, not the "
-         "checkpoints it shares a class with",
-         "[FaultList]") {
+          "checkpoints it shares a class with",
+          "[FaultList]") {
   // a -\           /- h1 (And, with c) -\
   //     G (Nand)  <                       y (Xor) -> out
   // b -/           \- h2 (And, with d) -/

@@ -34,9 +34,9 @@ Graph randomCircuit(std::mt19937& rng) {
     pool.push_back(graph.addGate(GateType::Pi, "i" + std::to_string(i)));
   }
 
-  static constexpr GateType kTypes[] = {GateType::And,  GateType::Nand, GateType::Or,
-                                        GateType::Nor,  GateType::Xor,  GateType::Xnor,
-                                        GateType::Buf,  GateType::Not};
+  static constexpr GateType kTypes[] = {GateType::And, GateType::Nand, GateType::Or,
+                                        GateType::Nor, GateType::Xor,  GateType::Xnor,
+                                        GateType::Buf, GateType::Not};
   std::uniform_int_distribution<int> typeDist(0, 7);
   std::uniform_real_distribution<double> unit(0.0, 1.0);
 
@@ -87,8 +87,7 @@ struct InjectedFault {
 };
 
 std::vector<bool> simulateWithFault(const Graph& graph, const std::vector<int>& piIndex,
-                                    const std::vector<bool>& piValues,
-                                    const InjectedFault& fault) {
+                                    const std::vector<bool>& piValues, const InjectedFault& fault) {
   std::vector<char> values(graph.size(), 0);
   for (const GateId id : graph.levelOrder()) {
     const Gate& gate = graph.gate(id);
@@ -315,7 +314,7 @@ std::vector<std::string> checkAgainstGroundTruth(const Graph& graph) {
 } // namespace
 
 TEST_CASE("generateFaultList collapsing preserves detection-set coverage and soundness",
-         "[FaultList][property]") {
+          "[FaultList][property]") {
   // Default corpus size keeps this a fast, deterministic ctest run; bump
   // kIterations locally for a deeper sweep when touching the collapsing
   // algorithm - this module's history includes bugs only exhaustive runs

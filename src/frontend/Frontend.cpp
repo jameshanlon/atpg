@@ -4,10 +4,10 @@
 #include "slang/ast/EvalContext.h"
 #include "slang/ast/Expression.h"
 #include "slang/ast/Scope.h"
-#include "slang/ast/expressions/AssignmentExpressions.h"
 #include "slang/ast/SemanticFacts.h"
 #include "slang/ast/Symbol.h"
 #include "slang/ast/ValuePath.h"
+#include "slang/ast/expressions/AssignmentExpressions.h"
 #include "slang/ast/symbols/CompilationUnitSymbols.h"
 #include "slang/ast/symbols/InstanceSymbols.h"
 #include "slang/ast/symbols/MemberSymbols.h"
@@ -64,7 +64,7 @@ std::string bitName(const Symbol& symbol, uint64_t bit, uint64_t width) {
 struct ResolvedPath {
   const ValueSymbol* root;
   uint64_t lo;        // first selected bit, 0-based from the LSB
-  uint64_t width;      // number of bits selected
+  uint64_t width;     // number of bits selected
   uint64_t rootWidth; // total declared width of root
 };
 
@@ -145,9 +145,8 @@ private:
     // AssignmentExpression whose left-hand side is the real lvalue - the
     // right-hand side is an unused placeholder. See
     // Expression::bindLValue in slang.
-    const Expression& target = expr.kind == ExpressionKind::Assignment
-                                    ? expr.as<AssignmentExpression>().left()
-                                    : expr;
+    const Expression& target =
+        expr.kind == ExpressionKind::Assignment ? expr.as<AssignmentExpression>().left() : expr;
 
     ValuePath path(target, evalCtx_);
     const ValueSymbol* root = path.rootSymbol();
@@ -200,9 +199,9 @@ private:
         } else if (port->direction == ArgumentDirection::Out) {
           poPorts_.emplace_back(std::move(key), std::move(displayName));
         } else {
-          return Error(fmt::format(
-              "unsupported port direction on '{}': only input and output are supported",
-              port->name));
+          return Error(
+              fmt::format("unsupported port direction on '{}': only input and output are supported",
+                          port->name));
         }
       }
     }
@@ -218,8 +217,8 @@ private:
 
       const Expression* expr = pc->getExpression();
       if (expr == nullptr) {
-        return Error(fmt::format("unconnected port '{}' on instance '{}'", childPort->name,
-                                 child.name));
+        return Error(
+            fmt::format("unconnected port '{}' on instance '{}'", childPort->name, child.name));
       }
 
       ATPG_ASSIGN_OR_RETURN(const ResolvedPath rp, resolvePath(*expr));
@@ -230,7 +229,8 @@ private:
 
       for (uint64_t bit = 0; bit < width; ++bit) {
         std::string childKey = joinPath(childPrefix, bitName(internal, bit, width));
-        std::string parentKey = joinPath(parentPrefix, bitName(*rp.root, rp.lo + bit, rp.rootWidth));
+        std::string parentKey =
+            joinPath(parentPrefix, bitName(*rp.root, rp.lo + bit, rp.rootWidth));
         unite(childKey, parentKey);
       }
     }
