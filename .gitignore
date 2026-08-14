@@ -67,3 +67,7 @@ vcpkg_installed/
 # test output & cache
 Testing/
 .cache/
+
+# design specs and plans (not committed - see CLAUDE.md)
+docs/superpowers/
+.superpowers/

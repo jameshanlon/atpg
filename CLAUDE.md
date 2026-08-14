@@ -2,6 +2,14 @@
 
 Project-specific rules for atpg, in addition to global CLAUDE.md rules.
 
+## Project
+
+atpg is a gate-level ATPG (Automatic Test Pattern Generation) tool: a
+slang-based SystemVerilog frontend flattens a gate-primitive netlist into
+`atpg::ir::Graph`, `atpg::sim` simulates it, and `atpg::fault` generates and
+collapses its stuck-at fault list. See `README.md` for build/usage and
+architecture details.
+
 ## Error handling
 
 - No exceptions. Every fallible function returns `atpg::Result<T>` (a value
@@ -18,7 +26,11 @@ Project-specific rules for atpg, in addition to global CLAUDE.md rules.
 ## Formatting and I/O
 
 - Use `fmt::format`/`fmt::print`, not stream operators (`<<`) or manual
-  string concatenation.
+  string concatenation. (Catch2's `INFO`/`FAIL` macros are the one
+  exception - they require `<<` by design.)
+- Formatting itself is enforced by `.clang-format` (LLVM style, 100-column
+  limit) via pre-commit - see `## Tooling` below. Don't hand-format against
+  it; run the hook or `clang-format -i`.
 
 ## Command-line tools
 
@@ -28,3 +40,44 @@ Project-specific rules for atpg, in addition to global CLAUDE.md rules.
 
 - Always brace control-flow bodies (`if`, `for`, `while`, `else`), even
   single-line ones.
+
+## Build system
+
+- CMake, C++20. Dependencies (slang, Catch2, CLI11, fmt) are pulled via
+  `FetchContent` in `cmake/Dependencies.cmake`, pinned to specific release
+  tags - never a floating branch or HEAD. fmt is resolved first, at the
+  root scope, so its target stays visible to every subdirectory (slang
+  resolves its own copy from inside its own subdirectory, which is too
+  narrow a scope for atpg's own targets to see).
+- One static library, `atpg-core`, with one namespace, `atpg`, split into
+  sub-namespaces by directory/responsibility (`atpg::ir`, `atpg::sim`,
+  `atpg::frontend`, `atpg::fault`) rather than separate CMake targets.
+
+## Testing
+
+- Catch2 v3. Tests live in `tests/unit/`, mirroring `src/`'s directory
+  structure (e.g. `src/fault/FaultList.cpp` -> `tests/unit/fault/
+  FaultTests.cpp`). Small hand-verifiable fixtures live in `tests/data/`.
+- For an algorithm where hand-derived expected values are error-prone to
+  trust beyond a single small case (the fault-list collapsing algorithm is
+  the current example - see `src/fault/FaultList.cpp`'s history), prefer a
+  randomized/property-based test that checks an invariant against an
+  independent ground truth over many generated cases, alongside the usual
+  hand-traced small-fixture tests. Keep the default iteration count fast
+  enough for routine `ctest` runs; a much larger sweep is for local use
+  when actually touching that algorithm, not for every CI run.
+
+## Tooling
+
+- `.clang-format` (LLVM style) formats the codebase; `.pre-commit-config.yaml`
+  runs it, plus standard file-hygiene hooks, before each commit. Run
+  `pre-commit install` once per clone to enable the git hook.
+
+## Docs and planning
+
+- Design specs and implementation plans (from the brainstorming/
+  writing-plans/subagent-driven-development skills) live under
+  `docs/superpowers/specs/` and `docs/superpowers/plans/`. Per the global
+  CLAUDE.md rule, these are not committed - key implementation details
+  that need to persist belong in code comments, this file, or `README.md`
+  instead.
