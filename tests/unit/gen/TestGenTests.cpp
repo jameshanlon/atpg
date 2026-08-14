@@ -2,6 +2,7 @@
 #include "atpg/fault/FaultList.hpp"
 #include "atpg/gen/TestGen.hpp"
 #include "atpg/ir/Graph.hpp"
+#include "atpg/sim/LogicSim.hpp"
 #include "ortools/sat/cp_model.h"
 #include "ortools/sat/cp_model.pb.h"
 #include "ortools/sat/cp_model_solver.h"
@@ -144,4 +145,95 @@ TEST_CASE("generateTests reports a genuinely redundant fault as Redundant", "[Te
 
   const TestResult& result = *testsResult.value().begin();
   CHECK(result.outcome == TestOutcome::Redundant);
+}
+
+namespace {
+
+using atpg::Result;
+using atpg::sim::simulate;
+using atpg::sim::simulateWithFault;
+
+Graph buildBinaryGateGraph(GateType type) {
+  Graph graph;
+  const GateId a = graph.addGate(GateType::Pi, "a");
+  const GateId b = graph.addGate(GateType::Pi, "b");
+  const GateId g = graph.addGate(type, "g");
+  const GateId y = graph.addGate(GateType::Po, "y");
+  graph.addEdge(a, g);
+  graph.addEdge(b, g);
+  graph.addEdge(g, y);
+  REQUIRE(graph.levelize().ok());
+  return graph;
+}
+
+Graph buildUnaryGateGraph(GateType type) {
+  Graph graph;
+  const GateId a = graph.addGate(GateType::Pi, "a");
+  const GateId g = graph.addGate(type, "g");
+  const GateId y = graph.addGate(GateType::Po, "y");
+  graph.addEdge(a, g);
+  graph.addEdge(g, y);
+  REQUIRE(graph.levelize().ok());
+  return graph;
+}
+
+void checkEveryFaultTestable(const Graph& graph) {
+  const FaultList faults = generateFaultList(graph);
+  const Result<TestSet> testsResult = generateTests(graph, faults);
+  REQUIRE(testsResult.ok());
+  const TestSet& tests = testsResult.value();
+  REQUIRE(tests.size() == faults.size());
+
+  for (const auto& result : tests) {
+    INFO("fault on gate " << result.fault.pin.gate);
+    REQUIRE(result.outcome == TestOutcome::Testable);
+    REQUIRE(result.pattern.size() == graph.primaryInputs().size());
+
+    const auto good = simulate(graph, result.pattern);
+    const auto faulted =
+        simulateWithFault(graph, result.pattern, result.fault.pin, result.fault.value);
+    REQUIRE(good.ok());
+    REQUIRE(faulted.ok());
+    CHECK(good.value() != faulted.value());
+  }
+}
+
+} // namespace
+
+TEST_CASE("generateTests finds a detecting pattern for every fault of a 2-input AND gate",
+          "[TestGen]") {
+  checkEveryFaultTestable(buildBinaryGateGraph(GateType::And));
+}
+
+TEST_CASE("generateTests finds a detecting pattern for every fault of a 2-input NAND gate",
+          "[TestGen]") {
+  checkEveryFaultTestable(buildBinaryGateGraph(GateType::Nand));
+}
+
+TEST_CASE("generateTests finds a detecting pattern for every fault of a 2-input OR gate",
+          "[TestGen]") {
+  checkEveryFaultTestable(buildBinaryGateGraph(GateType::Or));
+}
+
+TEST_CASE("generateTests finds a detecting pattern for every fault of a 2-input NOR gate",
+          "[TestGen]") {
+  checkEveryFaultTestable(buildBinaryGateGraph(GateType::Nor));
+}
+
+TEST_CASE("generateTests finds a detecting pattern for every fault of a 2-input XOR gate",
+          "[TestGen]") {
+  checkEveryFaultTestable(buildBinaryGateGraph(GateType::Xor));
+}
+
+TEST_CASE("generateTests finds a detecting pattern for every fault of a 2-input XNOR gate",
+          "[TestGen]") {
+  checkEveryFaultTestable(buildBinaryGateGraph(GateType::Xnor));
+}
+
+TEST_CASE("generateTests finds a detecting pattern for every fault of a BUF gate", "[TestGen]") {
+  checkEveryFaultTestable(buildUnaryGateGraph(GateType::Buf));
+}
+
+TEST_CASE("generateTests finds a detecting pattern for every fault of a NOT gate", "[TestGen]") {
+  checkEveryFaultTestable(buildUnaryGateGraph(GateType::Not));
 }
