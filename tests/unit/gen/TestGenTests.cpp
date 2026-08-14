@@ -1,5 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include "atpg/fault/Fault.hpp"
+#include "atpg/gen/TestGen.hpp"
 #include "ortools/sat/cp_model.h"
 #include "ortools/sat/cp_model.pb.h"
 #include "ortools/sat/cp_model_solver.h"
@@ -12,6 +14,9 @@ using operations_research::sat::CpSolverStatus;
 using operations_research::sat::SatParameters;
 using operations_research::sat::SolutionBooleanValue;
 using operations_research::sat::SolveWithParameters;
+
+using namespace atpg::fault;
+using namespace atpg::gen;
 
 TEST_CASE("CP-SAT solves a trivial satisfiable boolean model", "[gen][smoke]") {
   CpModelBuilder builder;
@@ -29,4 +34,21 @@ TEST_CASE("CP-SAT solves a trivial satisfiable boolean model", "[gen][smoke]") {
            response.status() == CpSolverStatus::FEASIBLE));
   CHECK(SolutionBooleanValue(response, a) == true);
   CHECK(SolutionBooleanValue(response, b) == false);
+}
+
+TEST_CASE("TestSet stores results in insertion order", "[TestGen]") {
+  TestSet results;
+  const Fault f1{PinRef{0, PinKind::Output, 0}, StuckValue::SA0};
+  const Fault f2{PinRef{1, PinKind::Output, 0}, StuckValue::SA1};
+  results.add(TestResult{f1, TestOutcome::Testable, {true, false}});
+  results.add(TestResult{f2, TestOutcome::Redundant, {}});
+
+  REQUIRE(results.size() == 2);
+  auto it = results.begin();
+  CHECK(it->fault == f1);
+  CHECK(it->outcome == TestOutcome::Testable);
+  CHECK((it->pattern == std::vector<bool>{true, false}));
+  ++it;
+  CHECK(it->fault == f2);
+  CHECK(it->outcome == TestOutcome::Redundant);
 }
