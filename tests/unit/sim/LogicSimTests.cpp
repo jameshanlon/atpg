@@ -1,10 +1,12 @@
 #include "../Test.hpp"
 
+#include "atpg/fault/Fault.hpp"
 #include "atpg/ir/Graph.hpp"
 #include "atpg/sim/LogicSim.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
+using namespace atpg::fault;
 using namespace atpg::ir;
 using namespace atpg::sim;
 
@@ -99,4 +101,72 @@ TEST_CASE("simulate rejects a stimulus vector of the wrong width", "[LogicSim]")
                               "buf1");
 
   CHECK_FALSE(simulate(graph, std::vector<bool>{true, false}).ok());
+}
+
+TEST_CASE("simulateWithFault matches simulate when the stuck value equals the good value",
+          "[LogicSim]") {
+  Graph graph;
+  const GateId a = graph.addGate(GateType::Pi, "a");
+  const GateId b = graph.addGate(GateType::Pi, "b");
+  const GateId g = graph.addGate(GateType::And, "g");
+  const GateId y = graph.addGate(GateType::Po, "y");
+  graph.addEdge(a, g);
+  graph.addEdge(b, g);
+  graph.addEdge(g, y);
+  REQUIRE(graph.levelize().ok());
+
+  const PinRef gOutput{g, PinKind::Output, 0};
+  const auto good = simulate(graph, {true, true});
+  const auto faulted = simulateWithFault(graph, {true, true}, gOutput, StuckValue::SA1);
+  REQUIRE(good.ok());
+  REQUIRE(faulted.ok());
+  CHECK(faulted.value() == good.value());
+}
+
+TEST_CASE("simulateWithFault forces a gate's output-pin fault", "[LogicSim]") {
+  Graph graph;
+  const GateId a = graph.addGate(GateType::Pi, "a");
+  const GateId b = graph.addGate(GateType::Pi, "b");
+  const GateId g = graph.addGate(GateType::And, "g");
+  const GateId y = graph.addGate(GateType::Po, "y");
+  graph.addEdge(a, g);
+  graph.addEdge(b, g);
+  graph.addEdge(g, y);
+  REQUIRE(graph.levelize().ok());
+
+  const auto good = simulate(graph, {true, true});
+  REQUIRE(good.ok());
+  CHECK(good.value()[0] == true);
+
+  const PinRef gOutput{g, PinKind::Output, 0};
+  const auto faulted = simulateWithFault(graph, {true, true}, gOutput, StuckValue::SA0);
+  REQUIRE(faulted.ok());
+  CHECK(faulted.value()[0] == false);
+}
+
+TEST_CASE("simulateWithFault only overrides the targeted consumer's read of an input-pin fault",
+          "[LogicSim]") {
+  // a -> g1 (Buf) -> y1
+  //   -> g2 (Buf) -> y2
+  Graph graph;
+  const GateId a = graph.addGate(GateType::Pi, "a");
+  const GateId g1 = graph.addGate(GateType::Buf, "g1");
+  const GateId g2 = graph.addGate(GateType::Buf, "g2");
+  const GateId y1 = graph.addGate(GateType::Po, "y1");
+  const GateId y2 = graph.addGate(GateType::Po, "y2");
+  graph.addEdge(a, g1);
+  graph.addEdge(a, g2);
+  graph.addEdge(g1, y1);
+  graph.addEdge(g2, y2);
+  REQUIRE(graph.levelize().ok());
+
+  // a = 1, but g1's read of it is stuck at 0: g1's output (y1) should read
+  // 0, while g2 (y2), which reads the same net normally, must still see
+  // the real value 1.
+  const PinRef g1Input{g1, PinKind::Input, 0};
+  const auto result = simulateWithFault(graph, {true}, g1Input, StuckValue::SA0);
+  REQUIRE(result.ok());
+  REQUIRE(result.value().size() == 2);
+  CHECK(result.value()[0] == false); // y1
+  CHECK(result.value()[1] == true);  // y2
 }
