@@ -30,6 +30,15 @@ Requires a C++20 compiler and CMake 3.21+. Dependencies ([slang](https://github.
 [fmt](https://github.com/fmtlib/fmt)) are fetched automatically via CMake
 `FetchContent` on first configure, so a network connection is needed then.
 
+[OR-Tools](https://developers.google.com/optimization) (v9.15+) and
+`pkg-config` are required system packages, resolved via `find_package`
+instead - building OR-Tools from source is far slower than this project's
+other dependencies. Install them before configuring:
+
+```sh
+brew install or-tools pkg-config
+```
+
 ```sh
 cmake -B build
 cmake --build build -j

@@ -49,6 +49,10 @@ architecture details.
   root scope, so its target stays visible to every subdirectory (slang
   resolves its own copy from inside its own subdirectory, which is too
   narrow a scope for atpg's own targets to see).
+- OR-Tools is a required system dependency resolved via `find_package`, not
+  `FetchContent`, because building it from source is far slower than this
+  project's other dependencies (see `cmake/Dependencies.cmake`'s comment for
+  the pkg-config gotcha).
 - One static library, `atpg-core`, with one namespace, `atpg`, split into
   sub-namespaces by directory/responsibility (`atpg::ir`, `atpg::sim`,
   `atpg::frontend`, `atpg::fault`) rather than separate CMake targets.

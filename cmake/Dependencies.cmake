@@ -40,3 +40,17 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(slang Catch2 CLI11)
 
 list(APPEND CMAKE_MODULE_PATH "${catch2_SOURCE_DIR}/extras")
+
+# OR-Tools - CP-SAT solver, required by atpg::gen. NOT fetched via
+# FetchContent: building it from source pulls in ~14 transitive C++
+# dependencies and can take 15-45+ minutes on a clean machine, unlike every
+# other dependency here. Install a prebuilt package instead. Its own CMake
+# config shells out to pkg-config for a few of its dependencies, so
+# pkg-config itself must be installed too, not just or-tools.
+find_package(ortools CONFIG QUIET)
+if(NOT ortools_FOUND)
+  message(FATAL_ERROR
+    "OR-Tools not found. Install a prebuilt package before configuring atpg:\n"
+    "  macOS:  brew install or-tools pkg-config\n"
+    "  other:  see https://developers.google.com/optimization/install/cpp\n")
+endif()
