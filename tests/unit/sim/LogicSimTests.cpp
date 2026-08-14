@@ -144,6 +144,25 @@ TEST_CASE("simulateWithFault forces a gate's output-pin fault", "[LogicSim]") {
   CHECK(faulted.value()[0] == false);
 }
 
+TEST_CASE("simulateWithFault forces a primary input's output-pin fault", "[LogicSim]") {
+  Graph graph;
+  const GateId a = graph.addGate(GateType::Pi, "a");
+  const GateId g = graph.addGate(GateType::Buf, "g");
+  const GateId y = graph.addGate(GateType::Po, "y");
+  graph.addEdge(a, g);
+  graph.addEdge(g, y);
+  REQUIRE(graph.levelize().ok());
+
+  const auto good = simulate(graph, {true});
+  REQUIRE(good.ok());
+  CHECK(good.value()[0] == true);
+
+  const PinRef aOutput{a, PinKind::Output, 0};
+  const auto faulted = simulateWithFault(graph, {true}, aOutput, StuckValue::SA0);
+  REQUIRE(faulted.ok());
+  CHECK(faulted.value()[0] == false);
+}
+
 TEST_CASE("simulateWithFault only overrides the targeted consumer's read of an input-pin fault",
           "[LogicSim]") {
   // a -> g1 (Buf) -> y1

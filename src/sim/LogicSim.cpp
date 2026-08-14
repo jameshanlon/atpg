@@ -60,6 +60,9 @@ Result<std::vector<bool>> simulateImpl(const ir::Graph& graph, const std::vector
   for (const ir::GateId id : graph.levelOrder()) {
     const ir::Gate& gate = graph.gate(id);
     if (gate.type == ir::GateType::Pi) {
+      if (faultPin != nullptr && faultPin->kind == fault::PinKind::Output && faultPin->gate == id) {
+        values[id] = faultValue == fault::StuckValue::SA1;
+      }
       continue;
     }
 
