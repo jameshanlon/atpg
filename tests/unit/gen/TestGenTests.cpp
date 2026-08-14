@@ -1,7 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "atpg/fault/Fault.hpp"
+#include "atpg/fault/FaultList.hpp"
 #include "atpg/gen/TestGen.hpp"
+#include "atpg/ir/Graph.hpp"
 #include "ortools/sat/cp_model.h"
 #include "ortools/sat/cp_model.pb.h"
 #include "ortools/sat/cp_model_solver.h"
@@ -17,6 +19,7 @@ using operations_research::sat::SolveWithParameters;
 
 using namespace atpg::fault;
 using namespace atpg::gen;
+using namespace atpg::ir;
 
 TEST_CASE("CP-SAT solves a trivial satisfiable boolean model", "[gen][smoke]") {
   CpModelBuilder builder;
@@ -51,4 +54,33 @@ TEST_CASE("TestSet stores results in insertion order", "[TestGen]") {
   ++it;
   CHECK(it->fault == f2);
   CHECK(it->outcome == TestOutcome::Redundant);
+}
+
+TEST_CASE("generateTests finds the unique pattern that detects a 2-input And gate's output SA0",
+          "[TestGen]") {
+  Graph graph;
+  const GateId a = graph.addGate(GateType::Pi, "a");
+  const GateId b = graph.addGate(GateType::Pi, "b");
+  const GateId g = graph.addGate(GateType::And, "g");
+  const GateId y = graph.addGate(GateType::Po, "y");
+  graph.addEdge(a, g);
+  graph.addEdge(b, g);
+  graph.addEdge(g, y);
+  REQUIRE(graph.levelize().ok());
+
+  // g's output SA0 is only detected when the good circuit's output is 1,
+  // which for a 2-input AND happens only when both inputs are 1 - a unique
+  // satisfying pattern, so the exact returned pattern can be asserted.
+  FaultList faults;
+  faults.add(FaultClass{Fault{PinRef{g, PinKind::Output, 0}, StuckValue::SA0}, {}});
+
+  const atpg::Result<TestSet> testsResult = generateTests(graph, faults);
+  REQUIRE(testsResult.ok());
+  REQUIRE(testsResult.value().size() == 1);
+
+  const TestResult& result = *testsResult.value().begin();
+  CHECK(result.outcome == TestOutcome::Testable);
+  REQUIRE(result.pattern.size() == 2);
+  CHECK(result.pattern[0] == true);
+  CHECK(result.pattern[1] == true);
 }
