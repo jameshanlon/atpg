@@ -3,8 +3,10 @@
 #include "atpg/ir/Graph.hpp"
 
 #include <catch2/catch_test_macros.hpp>
+#include <fmt/format.h>
 
 #include <cstdint>
+#include <iterator>
 #include <map>
 #include <random>
 #include <string>
@@ -185,15 +187,14 @@ std::string dumpCircuit(const Graph& graph) {
   std::string text;
   for (std::size_t i = 0; i < graph.size(); ++i) {
     const Gate& gate = graph.gate(static_cast<GateId>(i));
-    text += "  " + std::string(gateTypeName(gate.type)) + " " + gate.name + "(" +
-           std::to_string(i) + ")";
+    fmt::format_to(std::back_inserter(text), "  {} {}({})", gateTypeName(gate.type), gate.name, i);
     if (!gate.fanin.empty()) {
-      text += " <-";
+      fmt::format_to(std::back_inserter(text), " <-");
       for (const GateId in : gate.fanin) {
-        text += " " + graph.gate(in).name;
+        fmt::format_to(std::back_inserter(text), " {}", graph.gate(in).name);
       }
     }
-    text += " [fanout=" + std::to_string(gate.fanout.size()) + "]\n";
+    fmt::format_to(std::back_inserter(text), " [fanout={}]\n", gate.fanout.size());
   }
   return text;
 }
