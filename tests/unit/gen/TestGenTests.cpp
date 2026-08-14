@@ -1,5 +1,3 @@
-#include <catch2/catch_test_macros.hpp>
-
 #include "atpg/fault/Fault.hpp"
 #include "atpg/fault/FaultList.hpp"
 #include "atpg/gen/TestGen.hpp"
@@ -8,6 +6,14 @@
 #include "ortools/sat/cp_model.pb.h"
 #include "ortools/sat/cp_model_solver.h"
 #include "ortools/sat/sat_parameters.pb.h"
+
+// Must come after the OR-Tools includes above: ortools transitively includes
+// absl/log/check.h, which #defines CHECK as its own (fatal, SIGABRT-on-failure)
+// macro with no include guard on the name. Undefining it first and including
+// Catch2's header last makes Catch2's CHECK() win, so failures are reported
+// by Catch2 instead of aborting the whole test binary.
+#undef CHECK
+#include <catch2/catch_test_macros.hpp>
 
 using operations_research::sat::BoolVar;
 using operations_research::sat::CpModelBuilder;
@@ -83,4 +89,59 @@ TEST_CASE("generateTests finds the unique pattern that detects a 2-input And gat
   REQUIRE(result.pattern.size() == 2);
   CHECK(result.pattern[0] == true);
   CHECK(result.pattern[1] == true);
+}
+
+TEST_CASE("generateTests detects a stuck-at fault on a primary input's own output pin",
+          "[TestGen]") {
+  Graph graph;
+  const GateId a = graph.addGate(GateType::Pi, "a");
+  const GateId y = graph.addGate(GateType::Po, "y");
+  graph.addEdge(a, y);
+  REQUIRE(graph.levelize().ok());
+
+  // y == a, so a's own output SA1 is only detected when a's good value is 0
+  // - a unique satisfying pattern, so the exact returned pattern can be
+  // asserted.
+  FaultList faults;
+  faults.add(FaultClass{Fault{PinRef{a, PinKind::Output, 0}, StuckValue::SA1}, {}});
+
+  const atpg::Result<TestSet> testsResult = generateTests(graph, faults);
+  REQUIRE(testsResult.ok());
+  REQUIRE(testsResult.value().size() == 1);
+
+  const TestResult& result = *testsResult.value().begin();
+  CHECK(result.outcome == TestOutcome::Testable);
+  REQUIRE(result.pattern.size() == 1);
+  CHECK(result.pattern[0] == false);
+}
+
+TEST_CASE("generateTests reports a genuinely redundant fault as Redundant", "[TestGen]") {
+  // y = a AND (a OR b), which by absorption equals a for every input - so
+  // forcing the OR gate's output to 1 changes nothing observable: the AND
+  // still reduces to a AND 1 = a as before the fault, and to a AND 0 = 0
+  // only where the good circuit already produced 0. This exercises the
+  // exhaustive tripwire on the Redundant path (small enough to be checked)
+  // without it firing a false positive.
+  Graph graph;
+  const GateId a = graph.addGate(GateType::Pi, "a");
+  const GateId b = graph.addGate(GateType::Pi, "b");
+  const GateId orGate = graph.addGate(GateType::Or, "orGate");
+  const GateId andGate = graph.addGate(GateType::And, "andGate");
+  const GateId y = graph.addGate(GateType::Po, "y");
+  graph.addEdge(a, orGate);
+  graph.addEdge(b, orGate);
+  graph.addEdge(a, andGate);
+  graph.addEdge(orGate, andGate);
+  graph.addEdge(andGate, y);
+  REQUIRE(graph.levelize().ok());
+
+  FaultList faults;
+  faults.add(FaultClass{Fault{PinRef{orGate, PinKind::Output, 0}, StuckValue::SA1}, {}});
+
+  const atpg::Result<TestSet> testsResult = generateTests(graph, faults);
+  REQUIRE(testsResult.ok());
+  REQUIRE(testsResult.value().size() == 1);
+
+  const TestResult& result = *testsResult.value().begin();
+  CHECK(result.outcome == TestOutcome::Redundant);
 }

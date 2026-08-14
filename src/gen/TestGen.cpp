@@ -9,6 +9,7 @@
 #include "ortools/sat/cp_model_solver.h"
 #include "ortools/sat/sat_parameters.pb.h"
 
+#include <cstdint>
 #include <vector>
 
 namespace atpg::gen {
@@ -22,6 +23,36 @@ using operations_research::sat::CpSolverStatus;
 using operations_research::sat::SatParameters;
 using operations_research::sat::SolutionBooleanValue;
 using operations_research::sat::SolveWithParameters;
+
+// Bounds the exhaustive Redundant-path self-verification below: at this many
+// primary inputs, 2^16 patterns (each two simulations) is still cheap, but
+// the search space doubles with every additional input, so larger circuits
+// skip the check rather than pay for it.
+constexpr std::size_t kMaxExhaustiveVerificationInputs = 16;
+
+// For circuits small enough to afford it (see kMaxExhaustiveVerificationInputs),
+// exhaustively simulates every input pattern to check whether any of them
+// actually detects `fault` - a cheap tripwire on the Redundant path, mirroring
+// the Testable-path self-verification below, that INFEASIBLE alone can't
+// provide: CP-SAT wrongly reporting a testable fault as redundant would
+// otherwise go uncaught.
+Result<bool> anyPatternDetects(const ir::Graph& graph, const fault::Fault& fault) {
+  const std::size_t numInputs = graph.primaryInputs().size();
+  const std::uint64_t numPatterns = std::uint64_t{1} << numInputs;
+  std::vector<bool> pattern(numInputs);
+  for (std::uint64_t bits = 0; bits < numPatterns; ++bits) {
+    for (std::size_t i = 0; i < numInputs; ++i) {
+      pattern[i] = ((bits >> i) & 1) != 0;
+    }
+    ATPG_ASSIGN_OR_RETURN(const std::vector<bool> goodOutputs, sim::simulate(graph, pattern));
+    ATPG_ASSIGN_OR_RETURN(const std::vector<bool> faultyOutputs,
+                          sim::simulateWithFault(graph, pattern, fault.pin, fault.value));
+    if (goodOutputs != faultyOutputs) {
+      return true;
+    }
+  }
+  return false;
+}
 
 // out == AND(ins).
 void encodeAnd(CpModelBuilder& builder, const std::vector<BoolVar>& ins, BoolVar out) {
@@ -117,6 +148,9 @@ Result<TestResult> generateOne(const ir::Graph& graph, const fault::Fault& fault
   for (const ir::GateId id : graph.levelOrder()) {
     const ir::Gate& gate = graph.gate(id);
     if (gate.type == ir::GateType::Pi) {
+      if (fault.pin.kind == fault::PinKind::Output && fault.pin.gate == id) {
+        faulty[id] = fault.value == fault::StuckValue::SA1 ? trueVar : falseVar;
+      }
       continue;
     }
 
@@ -162,6 +196,16 @@ Result<TestResult> generateOne(const ir::Graph& graph, const fault::Fault& fault
     return Error("generateTests: CP-SAT rejected the model as invalid");
   }
   if (response.status() == CpSolverStatus::INFEASIBLE) {
+    if (graph.primaryInputs().size() <= kMaxExhaustiveVerificationInputs) {
+      ATPG_ASSIGN_OR_RETURN(const bool anyDetects, anyPatternDetects(graph, fault));
+      if (anyDetects) {
+        return Error(
+            fmt::format("generateTests: CP-SAT reported the fault at gate {} as redundant, but "
+                        "exhaustive simulation found a pattern that detects it - this is an "
+                        "encoding bug",
+                        fault.pin.gate));
+      }
+    }
     result.outcome = TestOutcome::Redundant;
     return result;
   }
