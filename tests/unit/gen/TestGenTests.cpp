@@ -16,6 +16,8 @@
 #undef CHECK
 #include <catch2/catch_test_macros.hpp>
 
+#include "../Test.hpp"
+
 using operations_research::sat::BoolVar;
 using operations_research::sat::CpModelBuilder;
 using operations_research::sat::CpSolverResponse;
@@ -236,4 +238,60 @@ TEST_CASE("generateTests finds a detecting pattern for every fault of a BUF gate
 
 TEST_CASE("generateTests finds a detecting pattern for every fault of a NOT gate", "[TestGen]") {
   checkEveryFaultTestable(buildUnaryGateGraph(GateType::Not));
+}
+
+TEST_CASE("generateTests reports a structurally redundant fault as Redundant", "[TestGen]") {
+  // y = (a AND b) OR (a AND NOT b), which simplifies to y == a for every
+  // input - by the OR-absorption law, a OR (a AND X) == a for any X. So
+  // g1's b-input (pin 1) stuck-at-1 can never be detected: hand-verified
+  // via truth table (a=0: y=0 both ways; a=1,b=0: y=1 both ways; a=1,b=1:
+  // y=1 both ways).
+  Graph graph;
+  const GateId a = graph.addGate(GateType::Pi, "a");
+  const GateId b = graph.addGate(GateType::Pi, "b");
+  const GateId nb = graph.addGate(GateType::Not, "nb");
+  const GateId g1 = graph.addGate(GateType::And, "g1");
+  const GateId g2 = graph.addGate(GateType::And, "g2");
+  const GateId y = graph.addGate(GateType::Or, "y");
+  const GateId po = graph.addGate(GateType::Po, "po");
+  graph.addEdge(b, nb);
+  graph.addEdge(a, g1);
+  graph.addEdge(b, g1);
+  graph.addEdge(a, g2);
+  graph.addEdge(nb, g2);
+  graph.addEdge(g1, y);
+  graph.addEdge(g2, y);
+  graph.addEdge(y, po);
+  REQUIRE(graph.levelize().ok());
+
+  const FaultList faults = generateFaultList(graph);
+  const Result<TestSet> testsResult = generateTests(graph, faults);
+  REQUIRE(testsResult.ok());
+
+  const Fault redundantFault{PinRef{g1, PinKind::Input, 1}, StuckValue::SA1};
+  bool found = false;
+  for (const auto& result : testsResult.value()) {
+    if (result.fault == redundantFault) {
+      found = true;
+      CHECK(result.outcome == TestOutcome::Redundant);
+    }
+  }
+  REQUIRE(found);
+}
+
+TEST_CASE("generateTests reports Aborted when the time limit is exhausted", "[TestGen]") {
+  auto graph = buildTestGraphFromFile(std::string(ATPG_TEST_DATA_DIR) + "/c17.sv", "c17");
+  REQUIRE(graph.levelize().ok());
+  const FaultList faults = generateFaultList(graph);
+
+  Options options;
+  options.timeLimitSeconds = 0.0;
+  const Result<TestSet> testsResult = generateTests(graph, faults, options);
+  REQUIRE(testsResult.ok());
+
+  bool anyAborted = false;
+  for (const auto& result : testsResult.value()) {
+    anyAborted = anyAborted || result.outcome == TestOutcome::Aborted;
+  }
+  CHECK(anyAborted);
 }
