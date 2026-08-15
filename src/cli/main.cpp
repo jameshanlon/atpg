@@ -134,7 +134,8 @@ int main(int argc, char** argv) {
   app.add_option("--dump-faults", dumpFaultsPath, "Write the collapsed fault list as plain text");
   app.add_option("--generate-tests", generateTestsPath,
                  "Write a generated test pattern (or redundant/aborted) per fault to a file");
-  app.add_option("--time-limit", timeLimitSeconds, "Per-fault CP-SAT solver time limit in seconds");
+  app.add_option("--time-limit", timeLimitSeconds, "Per-fault CP-SAT solver time limit in seconds")
+      ->check(CLI::PositiveNumber);
   app.add_option("--stimulus", stimulusPath,
                  "Read newline-separated 0/1 stimulus vectors and simulate each one");
 

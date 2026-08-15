@@ -20,7 +20,7 @@ enum class TestOutcome {
 /// The outcome of generating a test for one fault class's representative.
 struct TestResult {
   fault::Fault fault;
-  TestOutcome outcome;
+  TestOutcome outcome = TestOutcome::Aborted;
   /// One bit per graph.primaryInputs(), in that order. Only meaningful
   /// when `outcome == TestOutcome::Testable`.
   std::vector<bool> pattern;
@@ -54,6 +54,13 @@ private:
 /// options.timeLimitSeconds) using a SAT-based miter construction. `graph`
 /// must already be levelized (graph.levelize() called and ok()). See
 /// `src/gen/TestGen.cpp` for the implementation.
+///
+/// Returns an Error for two distinct reasons: an invalid argument (e.g. a
+/// negative `options.timeLimitSeconds`), naming the bad value - fix the
+/// call site; or a self-verification failure, where CP-SAT's answer for a
+/// fault disagrees with an independent simulation of its own reported
+/// pattern - this should never happen and indicates a bug in atpg's SAT
+/// encoding itself, not in the caller's input.
 Result<TestSet> generateTests(const ir::Graph& graph, const fault::FaultList& faults,
                               Options options = {});
 

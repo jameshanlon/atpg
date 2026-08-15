@@ -6,8 +6,10 @@ Project-specific rules for atpg, in addition to global CLAUDE.md rules.
 
 atpg is a gate-level ATPG (Automatic Test Pattern Generation) tool: a
 slang-based SystemVerilog frontend flattens a gate-primitive netlist into
-`atpg::ir::Graph`, `atpg::sim` simulates it, and `atpg::fault` generates and
-collapses its stuck-at fault list. See `README.md` for build/usage and
+`atpg::ir::Graph`, `atpg::sim` simulates it, `atpg::fault` generates and
+collapses its stuck-at fault list, and `atpg::gen` generates (or proves
+redundant) a test pattern per fault class using a SAT-based miter
+construction on OR-Tools CP-SAT. See `README.md` for build/usage and
 architecture details.
 
 ## Error handling
@@ -55,7 +57,8 @@ architecture details.
   the pkg-config gotcha).
 - One static library, `atpg-core`, with one namespace, `atpg`, split into
   sub-namespaces by directory/responsibility (`atpg::ir`, `atpg::sim`,
-  `atpg::frontend`, `atpg::fault`) rather than separate CMake targets.
+  `atpg::frontend`, `atpg::fault`, `atpg::gen`) rather than separate CMake
+  targets.
 
 ## Testing
 
@@ -70,6 +73,14 @@ architecture details.
   hand-traced small-fixture tests. Keep the default iteration count fast
   enough for routine `ctest` runs; a much larger sweep is for local use
   when actually touching that algorithm, not for every CI run.
+- Mixing Catch2 with OR-Tools in one test file has two include-order
+  constraints (see `tests/unit/gen/TestGenTests.cpp`): (a) OR-Tools
+  transitively pulls in absl's fatal `CHECK`, which shadows Catch2's -
+  include the OR-Tools headers first, then `#undef CHECK`, then Catch2's
+  header; (b) `#include "../Test.hpp"` must come after the Catch2 include,
+  since `Test.hpp` transitively includes Catch2 too and would otherwise
+  satisfy its include guard before the `#undef CHECK` above runs, leaving
+  `CHECK` permanently undefined.
 
 ## Tooling
 

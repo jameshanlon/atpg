@@ -74,12 +74,7 @@ Result<std::vector<bool>> simulateImpl(const ir::Graph& graph, const std::vector
       return values[gate.fanin[i]];
     };
 
-    Result<bool> result = evaluateGate(gate, read);
-    if (!result) {
-      return Error(result.error());
-    }
-
-    bool v = result.value();
+    ATPG_ASSIGN_OR_RETURN(bool v, evaluateGate(gate, read));
     if (faultPin != nullptr && faultPin->kind == fault::PinKind::Output && faultPin->gate == id) {
       v = faultValue == fault::StuckValue::SA1;
     }

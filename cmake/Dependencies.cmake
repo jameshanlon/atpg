@@ -47,7 +47,7 @@ list(APPEND CMAKE_MODULE_PATH "${catch2_SOURCE_DIR}/extras")
 # other dependency here. Install a prebuilt package instead. Its own CMake
 # config shells out to pkg-config for a few of its dependencies, so
 # pkg-config itself must be installed too, not just or-tools.
-find_package(ortools CONFIG QUIET)
+find_package(ortools 9.15 CONFIG QUIET)
 if(NOT ortools_FOUND)
   message(FATAL_ERROR
     "OR-Tools not found. Install a prebuilt package before configuring atpg:\n"

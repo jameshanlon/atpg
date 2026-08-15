@@ -15,7 +15,12 @@
 // by Catch2 instead of aborting the whole test binary.
 #undef CHECK
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 
+// Must come after the Catch2 include above, not before: Test.hpp
+// transitively includes Catch2's header too, so including it first would
+// satisfy Catch2's include guard before the #undef CHECK above runs,
+// permanently leaving CHECK undefined and breaking every CHECK() below.
 #include "../Test.hpp"
 
 using operations_research::sat::BoolVar;
@@ -277,6 +282,21 @@ TEST_CASE("generateTests reports a structurally redundant fault as Redundant", "
     }
   }
   REQUIRE(found);
+}
+
+TEST_CASE("generateTests rejects a negative time limit with an actionable error", "[TestGen]") {
+  auto graph = buildTestGraphFromFile(std::string(ATPG_TEST_DATA_DIR) + "/c17.sv", "c17");
+  REQUIRE(graph.levelize().ok());
+  const FaultList faults = generateFaultList(graph);
+
+  Options options;
+  options.timeLimitSeconds = -1.0;
+  const Result<TestSet> testsResult = generateTests(graph, faults, options);
+  REQUIRE_FALSE(testsResult.ok());
+  CHECK_THAT(testsResult.error(), Catch::Matchers::ContainsSubstring("timeLimitSeconds"));
+  CHECK_THAT(testsResult.error(), Catch::Matchers::ContainsSubstring("-1"));
+  // The invalid-parameter error must not be mistaken for an encoding bug.
+  CHECK_THAT(testsResult.error(), !Catch::Matchers::ContainsSubstring("encoding bug"));
 }
 
 TEST_CASE("generateTests reports Aborted when the time limit is exhausted", "[TestGen]") {

@@ -242,6 +242,11 @@ Result<TestResult> generateOne(const ir::Graph& graph, const fault::Fault& fault
 
 Result<TestSet> generateTests(const ir::Graph& graph, const fault::FaultList& faults,
                               Options options) {
+  if (options.timeLimitSeconds < 0.0) {
+    return Error(fmt::format("generateTests: options.timeLimitSeconds must not be negative, got {}",
+                             options.timeLimitSeconds));
+  }
+
   TestSet results;
   for (const auto& faultClass : faults) {
     ATPG_ASSIGN_OR_RETURN(TestResult result,
