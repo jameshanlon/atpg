@@ -1,6 +1,7 @@
 #include "atpg/Result.hpp"
 #include "atpg/fault/FaultList.hpp"
 #include "atpg/frontend/Frontend.hpp"
+#include "atpg/gen/TestGen.hpp"
 #include "atpg/ir/Graph.hpp"
 #include "atpg/sim/LogicSim.hpp"
 
@@ -55,6 +56,29 @@ void writeFaultList(const atpg::ir::Graph& graph, const atpg::fault::FaultList& 
   }
 }
 
+void writeTests(const atpg::ir::Graph& graph, const atpg::gen::TestSet& tests, std::ostream& os) {
+  for (const auto& result : tests) {
+    fmt::print(os, "{}: ", describeFault(graph, result.fault));
+    switch (result.outcome) {
+      case atpg::gen::TestOutcome::Testable: {
+        std::string bits;
+        bits.reserve(result.pattern.size());
+        for (const bool bit : result.pattern) {
+          bits.push_back(bit ? '1' : '0');
+        }
+        fmt::print(os, "testable {}\n", bits);
+        break;
+      }
+      case atpg::gen::TestOutcome::Redundant:
+        fmt::print(os, "redundant\n");
+        break;
+      case atpg::gen::TestOutcome::Aborted:
+        fmt::print(os, "aborted\n");
+        break;
+    }
+  }
+}
+
 atpg::Status runStimulus(const atpg::ir::Graph& graph, const std::string& path) {
   std::ifstream ifs(path);
   if (!ifs) {
@@ -99,6 +123,8 @@ int main(int argc, char** argv) {
   std::string dumpGraphPath;
   std::string dumpFaultsPath;
   std::string stimulusPath;
+  std::string generateTestsPath;
+  double timeLimitSeconds = atpg::gen::Options{}.timeLimitSeconds;
 
   app.add_option("file", file, "SystemVerilog file containing the design")
       ->required()
@@ -106,6 +132,9 @@ int main(int argc, char** argv) {
   app.add_option("--top", top, "Top module name")->required();
   app.add_option("--dump-graph", dumpGraphPath, "Write the flattened gate graph as Graphviz dot");
   app.add_option("--dump-faults", dumpFaultsPath, "Write the collapsed fault list as plain text");
+  app.add_option("--generate-tests", generateTestsPath,
+                 "Write a generated test pattern (or redundant/aborted) per fault to a file");
+  app.add_option("--time-limit", timeLimitSeconds, "Per-fault CP-SAT solver time limit in seconds");
   app.add_option("--stimulus", stimulusPath,
                  "Read newline-separated 0/1 stimulus vectors and simulate each one");
 
@@ -154,6 +183,23 @@ int main(int argc, char** argv) {
       return 1;
     }
     writeFaultList(graph, atpg::fault::generateFaultList(graph), ofs);
+  }
+
+  if (!generateTestsPath.empty()) {
+    std::ofstream ofs(generateTestsPath);
+    if (!ofs) {
+      fmt::print(stderr, "error: could not open {} for writing\n", generateTestsPath);
+      return 1;
+    }
+    atpg::gen::Options options;
+    options.timeLimitSeconds = timeLimitSeconds;
+    const atpg::Result<atpg::gen::TestSet> testsResult =
+        atpg::gen::generateTests(graph, atpg::fault::generateFaultList(graph), options);
+    if (!testsResult) {
+      fmt::print(stderr, "error: {}\n", testsResult.error());
+      return 1;
+    }
+    writeTests(graph, testsResult.value(), ofs);
   }
 
   if (!stimulusPath.empty()) {

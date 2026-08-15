@@ -295,3 +295,29 @@ TEST_CASE("generateTests reports Aborted when the time limit is exhausted", "[Te
   }
   CHECK(anyAborted);
 }
+
+TEST_CASE("generateTests produces a genuinely detecting pattern for every c17 fault", "[TestGen]") {
+  auto graph = buildTestGraphFromFile(std::string(ATPG_TEST_DATA_DIR) + "/c17.sv", "c17");
+  REQUIRE(graph.levelize().ok());
+  const FaultList faults = generateFaultList(graph);
+
+  const Result<TestSet> testsResult = generateTests(graph, faults);
+  REQUIRE(testsResult.ok());
+  const TestSet& tests = testsResult.value();
+  REQUIRE(tests.size() == faults.size());
+
+  for (const auto& result : tests) {
+    INFO("fault on gate " << result.fault.pin.gate);
+    // c17 is small enough, and has no known structurally-redundant faults,
+    // that every fault should resolve to Testable well within the default
+    // time limit - this is checked directly rather than assumed.
+    REQUIRE(result.outcome == TestOutcome::Testable);
+
+    const auto good = simulate(graph, result.pattern);
+    const auto faulted =
+        simulateWithFault(graph, result.pattern, result.fault.pin, result.fault.value);
+    REQUIRE(good.ok());
+    REQUIRE(faulted.ok());
+    CHECK(good.value() != faulted.value());
+  }
+}

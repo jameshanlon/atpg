@@ -19,9 +19,13 @@ SystemVerilog frontend.
   (SA0/SA1) fault on every gate pin and collapses them via local
   per-gate equivalence and the checkpoint theorem, roughly halving the
   list a downstream ATPG/fault-simulation stage would need to target.
+- **Test generation** (`atpg::gen`): generates a detecting test pattern
+  for every fault class in the collapsed fault list (or proves it
+  redundant, or reports that the per-fault solver time limit was
+  exhausted) via a CP-SAT miter formulation.
 
-Not yet implemented: deterministic (SAT-based) test generation, fault
-simulation, pattern compaction, and STIL output.
+Not yet implemented: fault simulation, pattern compaction, and STIL
+output.
 
 ## Building
 
@@ -53,12 +57,17 @@ ctest --test-dir build
 ## Usage
 
 ```sh
-atpg <file.sv> --top <module> [--dump-graph out.dot] [--dump-faults out.txt] [--stimulus vectors.txt]
+atpg <file.sv> --top <module> [--dump-graph out.dot] [--dump-faults out.txt] [--generate-tests out.txt] [--time-limit seconds] [--stimulus vectors.txt]
 ```
 
 - `--dump-graph <path>` writes the flattened gate graph as Graphviz dot.
 - `--dump-faults <path>` writes the collapsed fault list as plain text,
   one line per fault class, e.g. `n1/out/SA1 = g5/in0/SA1`.
+- `--generate-tests <path>` writes a generated test pattern (or
+  `redundant`/`aborted`) per fault class to a file, one line per fault,
+  e.g. `n1/out/SA1: testable 10110`.
+- `--time-limit <seconds>` sets the per-fault CP-SAT solver time limit
+  used by `--generate-tests` (default 5 seconds).
 - `--stimulus <path>` reads newline-separated `0`/`1` vectors (one bit per
   primary input, in port order) and prints the simulated primary-output
   bits for each one.
