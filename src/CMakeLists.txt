@@ -11,4 +11,4 @@ target_include_directories(atpg-core PUBLIC ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(atpg-core PUBLIC slang::slang PRIVATE fmt::fmt ortools::ortools)
 
 add_executable(atpg cli/main.cpp)
-target_link_libraries(atpg PRIVATE atpg-core slang::slang fmt::fmt CLI11::CLI11 ortools::ortools)
+target_link_libraries(atpg PRIVATE atpg-core slang::slang fmt::fmt CLI11::CLI11)
