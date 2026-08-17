@@ -7,7 +7,8 @@ add_executable(
   fault/FaultTests.cpp
   fault/FaultListPropertyTests.cpp
   gen/TestGenTests.cpp
-  gen/TestGenPropertyTests.cpp)
+  gen/TestGenPropertyTests.cpp
+  fsim/FaultSimTests.cpp)
 
 target_link_libraries(atpg-tests PRIVATE atpg-core slang::slang fmt::fmt ortools::ortools Catch2::Catch2WithMain)
 target_include_directories(atpg-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
