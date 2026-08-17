@@ -36,12 +36,23 @@ std::size_t oracleFirstDetecting(const Graph& graph, const std::vector<int>& piI
   return patterns.size();
 }
 
-std::vector<std::string> checkAgainstGroundTruth(const Graph& graph,
+/// Every atomic fault as its own single-member class. `simulateFaults`
+/// accepts any FaultList, not just a collapsed one, and collapsing discards
+/// whole fault shapes (a fanout-1 gate's own output fault, for instance) that
+/// would otherwise never reach the simulator from a test.
+FaultList allAtomsAsClasses(const Graph& graph) {
+  FaultList faults;
+  for (const Fault& atom : enumerateAtoms(graph)) {
+    faults.add(FaultClass{atom, {}});
+  }
+  return faults;
+}
+
+std::vector<std::string> checkAgainstGroundTruth(const Graph& graph, const FaultList& faults,
                                                  const std::vector<std::vector<bool>>& patterns) {
   std::vector<std::string> violations;
 
   const std::vector<int> piIndex = primaryInputIndex(graph);
-  const FaultList faults = generateFaultList(graph);
 
   const atpg::Result<SimResult> simResult = simulateFaults(graph, faults, patterns);
   if (!simResult.ok()) {
@@ -108,14 +119,29 @@ TEST_CASE("simulateFaults agrees with scalar simulation on random circuits",
       }
     }
 
-    const std::vector<std::string> violations = checkAgainstGroundTruth(graph, patterns);
-    if (!violations.empty()) {
-      INFO("circuit #" << i << " (seed " << kSeed << ", " << patternCount << " patterns):\n"
-                       << dumpCircuit(graph));
-      for (const auto& violation : violations) {
-        INFO(violation);
+    // Both fault-list shapes the API accepts: the collapsed list a caller
+    // normally passes, and every atomic fault as its own class. The latter
+    // reaches fault shapes collapsing discards, which the collapsed list
+    // alone would never present to the simulator.
+    struct Corpus {
+      const char* what;
+      FaultList faults;
+    };
+    const Corpus corpora[] = {{"collapsed fault list", generateFaultList(graph)},
+                              {"all atomic faults", allAtomsAsClasses(graph)}};
+
+    for (const Corpus& corpus : corpora) {
+      const std::vector<std::string> violations =
+          checkAgainstGroundTruth(graph, corpus.faults, patterns);
+      if (!violations.empty()) {
+        INFO("circuit #" << i << " (seed " << kSeed << ", " << patternCount << " patterns, "
+                         << corpus.what << "):\n"
+                         << dumpCircuit(graph));
+        for (const auto& violation : violations) {
+          INFO(violation);
+        }
+        FAIL("simulateFaults disagreed with scalar simulation");
       }
-      FAIL("simulateFaults disagreed with scalar simulation");
     }
   }
 }
