@@ -303,3 +303,88 @@ TEST_CASE("an empty pattern set leaves every fault undetected", "[FaultSim]") {
   REQUIRE(result.value().size() == 1);
   CHECK(result.value().begin()->detected == false);
 }
+
+namespace {
+
+// a -> g (Buf) -> y, with g's output stuck at 0: detected by exactly those
+// patterns where a == 1, which makes the expected detection set trivial to
+// state for any pattern count.
+struct BufFixture {
+  Graph graph;
+  GateId a = 0;
+  GateId g = 0;
+  FaultList faults;
+};
+
+BufFixture makeBufFixture() {
+  BufFixture fixture;
+  fixture.a = fixture.graph.addGate(GateType::Pi, "a");
+  fixture.g = fixture.graph.addGate(GateType::Buf, "g");
+  const GateId y = fixture.graph.addGate(GateType::Po, "y");
+  fixture.graph.addEdge(fixture.a, fixture.g);
+  fixture.graph.addEdge(fixture.g, y);
+  REQUIRE(fixture.graph.levelize().ok());
+  fixture.faults.add(FaultClass{Fault{PinRef{fixture.g, PinKind::Output, 0}, StuckValue::SA0}, {}});
+  return fixture;
+}
+
+} // namespace
+
+TEST_CASE("detection is reported at the correct index across packet boundaries", "[FaultSim]") {
+  // For each total pattern count, put the single a==1 pattern at a position
+  // chosen to sit just before, on, or just after a 64-pattern boundary.
+  struct Case {
+    std::size_t total;
+    std::size_t detectingIndex;
+  };
+  const Case cases[] = {
+      {1, 0},   {63, 62},   {64, 63},   {64, 0},   {65, 64},
+      {65, 63}, {128, 127}, {129, 128}, {129, 64}, {129, 0},
+  };
+
+  for (const Case& c : cases) {
+    BufFixture fixture = makeBufFixture();
+    std::vector<std::vector<bool>> patterns(c.total, std::vector<bool>{false});
+    patterns[c.detectingIndex] = {true};
+
+    const atpg::Result<SimResult> result = simulateFaults(fixture.graph, fixture.faults, patterns);
+    INFO("total=" << c.total << " detectingIndex=" << c.detectingIndex);
+    REQUIRE(result.ok());
+    REQUIRE(result.value().size() == 1);
+    CHECK(result.value().begin()->detected == true);
+    CHECK(result.value().begin()->firstDetectingPattern == c.detectingIndex);
+  }
+}
+
+TEST_CASE("padding lanes in a partial final packet do not report detections", "[FaultSim]") {
+  // Pattern counts that leave a partially filled final packet, with no
+  // pattern detecting the fault. If the active-pattern mask is wrong, the
+  // unused high lanes read as zeros and would expose the stuck-at-0 fault.
+  for (const std::size_t total :
+       {std::size_t{1}, std::size_t{63}, std::size_t{65}, std::size_t{100}, std::size_t{129}}) {
+    BufFixture fixture = makeBufFixture();
+    const std::vector<std::vector<bool>> patterns(total, std::vector<bool>{false});
+
+    const atpg::Result<SimResult> result = simulateFaults(fixture.graph, fixture.faults, patterns);
+    INFO("total=" << total);
+    REQUIRE(result.ok());
+    REQUIRE(result.value().size() == 1);
+    CHECK(result.value().begin()->detected == false);
+  }
+}
+
+TEST_CASE("the first detecting pattern is reported, not a later one", "[FaultSim]") {
+  // Several patterns detect; only the earliest index may be reported, and it
+  // must be found even when earlier packets contain no detection at all.
+  BufFixture fixture = makeBufFixture();
+  std::vector<std::vector<bool>> patterns(200, std::vector<bool>{false});
+  patterns[70] = {true};
+  patterns[71] = {true};
+  patterns[150] = {true};
+
+  const atpg::Result<SimResult> result = simulateFaults(fixture.graph, fixture.faults, patterns);
+  REQUIRE(result.ok());
+  REQUIRE(result.value().size() == 1);
+  CHECK(result.value().begin()->detected == true);
+  CHECK(result.value().begin()->firstDetectingPattern == 70);
+}
