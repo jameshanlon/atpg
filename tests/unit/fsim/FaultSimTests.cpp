@@ -436,3 +436,90 @@ TEST_CASE("c17's generated patterns achieve full fault coverage", "[FaultSim]") 
   }
   CHECK(results.value().coverage() == 1.0);
 }
+
+TEST_CASE("a fault whose cone reads an out-of-cone gate ignores the previous fault's values",
+          "[FaultSim]") {
+  // The engine reuses one `faulty` word array across faults without clearing
+  // it, relying on a cone-membership guard so a gate outside the current
+  // fault's cone is read from the good-circuit array instead. This case is
+  // built so that dropping that guard changes an answer.
+  //
+  //   p      -> shared (Buf) -\
+  //                             comb (And) -> y
+  //   narrow ----------------- /
+  //
+  // Fault 1 on `p` has `shared` in its cone and writes a faulty value there.
+  // Fault 2 on `narrow` does NOT have `shared` in its cone, but `comb` reads
+  // it - so fault 2 must see good[shared], not fault 1's leftovers.
+  Graph graph;
+  const GateId p = graph.addGate(GateType::Pi, "p");
+  const GateId narrow = graph.addGate(GateType::Pi, "narrow");
+  const GateId shared = graph.addGate(GateType::Buf, "shared");
+  const GateId comb = graph.addGate(GateType::And, "comb");
+  const GateId y = graph.addGate(GateType::Po, "y");
+  graph.addEdge(p, shared);
+  graph.addEdge(narrow, comb);
+  graph.addEdge(shared, comb);
+  graph.addEdge(comb, y);
+  REQUIRE(graph.levelize().ok());
+
+  // Order matters: fault 1 runs first and dirties faulty[shared].
+  FaultList faults;
+  faults.add(FaultClass{Fault{PinRef{p, PinKind::Output, 0}, StuckValue::SA1}, {}});
+  faults.add(FaultClass{Fault{PinRef{narrow, PinKind::Output, 0}, StuckValue::SA1}, {}});
+
+  // p=0, narrow=0. Good circuit: shared=0, comb=0, y=0.
+  //   Fault 1 (p/SA1): shared becomes 1, but comb reads good[narrow]=0, so
+  //     comb stays 0 - undetected.
+  //   Fault 2 (narrow/SA1): comb reads good[shared]=0, so comb stays 0 -
+  //     undetected. Reading fault 1's faulty[shared]=1 instead would make
+  //     comb 1 and wrongly report a detection.
+  const std::vector<std::vector<bool>> patterns = {{false, false}};
+
+  const atpg::Result<SimResult> result = simulateFaults(graph, faults, patterns);
+  REQUIRE(result.ok());
+  REQUIRE(result.value().size() == 2);
+
+  auto it = result.value().begin();
+  CHECK(it->detected == false); // p/SA1
+  ++it;
+  CHECK(it->detected == false); // narrow/SA1 - false detection if guard dropped
+}
+
+TEST_CASE("only a fault class's representative is simulated, never its equivalent members",
+          "[FaultSim]") {
+  // The class below pairs an undetectable representative with a detectable
+  // equivalent member - a combination fault collapsing would never produce,
+  // constructed precisely so that simulating the wrong member changes the
+  // answer. A property test cannot catch this: genuinely equivalent faults
+  // have identical detection by definition.
+  //
+  //   a -> dead (And, with b, unread)     <- representative's gate
+  //   a -> live (Buf) -> y                <- equivalent member's gate
+  Graph graph;
+  const GateId a = graph.addGate(GateType::Pi, "a");
+  const GateId b = graph.addGate(GateType::Pi, "b");
+  const GateId dead = graph.addGate(GateType::And, "dead");
+  const GateId live = graph.addGate(GateType::Buf, "live");
+  const GateId y = graph.addGate(GateType::Po, "y");
+  graph.addEdge(a, dead);
+  graph.addEdge(b, dead);
+  graph.addEdge(a, live);
+  graph.addEdge(live, y);
+  REQUIRE(graph.levelize().ok());
+
+  FaultList faults;
+  faults.add(FaultClass{// Representative: unobservable, since `dead` drives nothing.
+                        Fault{PinRef{dead, PinKind::Output, 0}, StuckValue::SA1},
+                        // Equivalent member: plainly detectable at y whenever a == 1.
+                        {Fault{PinRef{live, PinKind::Output, 0}, StuckValue::SA0}}});
+
+  const std::vector<std::vector<bool>> patterns = {{true, true}, {true, false}};
+
+  const atpg::Result<SimResult> result = simulateFaults(graph, faults, patterns);
+  REQUIRE(result.ok());
+  REQUIRE(result.value().size() == 1);
+  // Reports the representative back, and its verdict - not the member's.
+  CHECK(result.value().begin()->fault == Fault{PinRef{dead, PinKind::Output, 0}, StuckValue::SA1});
+  CHECK(result.value().begin()->detected == false);
+}

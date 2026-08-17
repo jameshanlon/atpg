@@ -62,7 +62,8 @@ private:
 ///
 /// Each entry of `patterns` holds one bit per graph.primaryInputs(), in that
 /// order - the same shape sim::simulate() takes. `graph` must already be
-/// levelized (graph.levelize() called and ok()).
+/// levelized (graph.levelize() called and ok()), and every representative's
+/// `pin.gate` must be a valid gate id in `graph`.
 ///
 /// Returns an Error if any pattern's width does not match the primary-input
 /// count. An empty `patterns` is not an error: every fault simply comes back

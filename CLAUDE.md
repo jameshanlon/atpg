@@ -58,8 +58,8 @@ build/usage and architecture details.
   the pkg-config gotcha).
 - One static library, `atpg-core`, with one namespace, `atpg`, split into
   sub-namespaces by directory/responsibility (`atpg::ir`, `atpg::sim`,
-  `atpg::frontend`, `atpg::fault`, `atpg::gen`, `atpg::fsim`) rather than separate CMake
-  targets.
+  `atpg::frontend`, `atpg::fault`, `atpg::gen`, `atpg::fsim`) rather than
+  separate CMake targets.
 
 ## Testing
 

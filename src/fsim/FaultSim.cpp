@@ -197,6 +197,11 @@ Result<SimResult> simulateFaults(const ir::Graph& graph, const fault::FaultList&
       if (diff != 0) {
         statuses[f].detected = true;
         statuses[f].firstDetectingPattern = base + static_cast<std::size_t>(std::countr_zero(diff));
+        // This fault is finished, so release its cone rather than holding
+        // every cone for the whole run. On a large design most faults drop
+        // in the first packet or two, so this is where the memory goes.
+        cones[f].clear();
+        cones[f].shrink_to_fit();
       }
     }
   }
