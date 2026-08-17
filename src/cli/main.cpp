@@ -1,6 +1,7 @@
 #include "atpg/Result.hpp"
 #include "atpg/fault/FaultList.hpp"
 #include "atpg/frontend/Frontend.hpp"
+#include "atpg/fsim/FaultSim.hpp"
 #include "atpg/gen/TestGen.hpp"
 #include "atpg/ir/Graph.hpp"
 #include "atpg/sim/LogicSim.hpp"
@@ -79,12 +80,15 @@ void writeTests(const atpg::ir::Graph& graph, const atpg::gen::TestSet& tests, s
   }
 }
 
-atpg::Status runStimulus(const atpg::ir::Graph& graph, const std::string& path) {
+/// Reads a stimulus file into one pattern per non-blank line, each holding
+/// one bit per primary input. Characters other than '0'/'1' are ignored.
+atpg::Result<std::vector<std::vector<bool>>> readStimulus(const std::string& path) {
   std::ifstream ifs(path);
   if (!ifs) {
     return atpg::Error(fmt::format("could not open stimulus file: {}", path));
   }
 
+  std::vector<std::vector<bool>> patterns;
   std::string line;
   while (std::getline(ifs, line)) {
     std::vector<bool> piValues;
@@ -95,10 +99,17 @@ atpg::Status runStimulus(const atpg::ir::Graph& graph, const std::string& path) 
         piValues.push_back(true);
       }
     }
-    if (piValues.empty()) {
-      continue;
+    if (!piValues.empty()) {
+      patterns.push_back(std::move(piValues));
     }
+  }
+  return patterns;
+}
 
+atpg::Status runStimulus(const atpg::ir::Graph& graph, const std::string& path) {
+  ATPG_ASSIGN_OR_RETURN(const std::vector<std::vector<bool>> patterns, readStimulus(path));
+
+  for (const std::vector<bool>& piValues : patterns) {
     ATPG_ASSIGN_OR_RETURN(const std::vector<bool> outputs, atpg::sim::simulate(graph, piValues));
 
     std::string bits;
@@ -109,6 +120,20 @@ atpg::Status runStimulus(const atpg::ir::Graph& graph, const std::string& path) 
     fmt::print("{}\n", bits);
   }
   return {};
+}
+
+void writeCoverage(const atpg::ir::Graph& graph, const atpg::fsim::SimResult& results,
+                   std::ostream& os) {
+  for (const atpg::fsim::FaultStatus& status : results) {
+    if (status.detected) {
+      fmt::print(os, "{}: detected by pattern {}\n", describeFault(graph, status.fault),
+                 status.firstDetectingPattern);
+    } else {
+      fmt::print(os, "{}: undetected\n", describeFault(graph, status.fault));
+    }
+  }
+  fmt::print(os, "coverage: {}/{} ({:.1f}%)\n", results.detectedCount(), results.size(),
+             results.coverage() * 100.0);
 }
 
 } // namespace
@@ -123,6 +148,7 @@ int main(int argc, char** argv) {
   std::string dumpGraphPath;
   std::string dumpFaultsPath;
   std::string stimulusPath;
+  std::string faultSimPath;
   std::string generateTestsPath;
   double timeLimitSeconds = atpg::gen::Options{}.timeLimitSeconds;
 
@@ -136,6 +162,8 @@ int main(int argc, char** argv) {
                  "Write a generated test pattern (or redundant/aborted) per fault to a file");
   app.add_option("--time-limit", timeLimitSeconds, "Per-fault CP-SAT solver time limit in seconds")
       ->check(CLI::PositiveNumber);
+  app.add_option("--fault-sim", faultSimPath,
+                 "Fault-simulate the --stimulus patterns and write a coverage report");
   app.add_option("--stimulus", stimulusPath,
                  "Read newline-separated 0/1 stimulus vectors and simulate each one");
 
@@ -201,6 +229,30 @@ int main(int argc, char** argv) {
       return 1;
     }
     writeTests(graph, testsResult.value(), ofs);
+  }
+
+  if (!faultSimPath.empty()) {
+    if (stimulusPath.empty()) {
+      fmt::print(stderr, "error: --fault-sim requires --stimulus to supply the patterns\n");
+      return 1;
+    }
+    const atpg::Result<std::vector<std::vector<bool>>> patterns = readStimulus(stimulusPath);
+    if (!patterns) {
+      fmt::print(stderr, "error: {}\n", patterns.error());
+      return 1;
+    }
+    std::ofstream ofs(faultSimPath);
+    if (!ofs) {
+      fmt::print(stderr, "error: could not open {} for writing\n", faultSimPath);
+      return 1;
+    }
+    const atpg::Result<atpg::fsim::SimResult> results =
+        atpg::fsim::simulateFaults(graph, atpg::fault::generateFaultList(graph), patterns.value());
+    if (!results) {
+      fmt::print(stderr, "error: {}\n", results.error());
+      return 1;
+    }
+    writeCoverage(graph, results.value(), ofs);
   }
 
   if (!stimulusPath.empty()) {

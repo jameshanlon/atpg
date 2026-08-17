@@ -23,9 +23,12 @@ SystemVerilog frontend.
   for every fault class in the collapsed fault list (or proves it
   redundant, or reports that the per-fault solver time limit was
   exhausted) via a CP-SAT miter formulation.
+- **Fault simulation** (`atpg::fsim`): given a pattern set, reports which
+  fault classes it detects, which pattern detected each one first, and the
+  overall coverage. Bit-parallel: 64 patterns are evaluated per machine
+  word, and each fault re-simulates only its own transitive fanout cone.
 
-Not yet implemented: fault simulation, pattern compaction, and STIL
-output.
+Not yet implemented: pattern compaction and STIL output.
 
 ## Building
 
@@ -57,7 +60,7 @@ ctest --test-dir build
 ## Usage
 
 ```sh
-atpg <file.sv> --top <module> [--dump-graph out.dot] [--dump-faults out.txt] [--generate-tests out.txt] [--time-limit seconds] [--stimulus vectors.txt]
+atpg <file.sv> --top <module> [--dump-graph out.dot] [--dump-faults out.txt] [--generate-tests out.txt] [--time-limit seconds] [--stimulus vectors.txt] [--fault-sim out.txt]
 ```
 
 - `--dump-graph <path>` writes the flattened gate graph as Graphviz dot.
@@ -71,6 +74,10 @@ atpg <file.sv> --top <module> [--dump-graph out.dot] [--dump-faults out.txt] [--
 - `--stimulus <path>` reads newline-separated `0`/`1` vectors (one bit per
   primary input, in port order) and prints the simulated primary-output
   bits for each one.
+- `--fault-sim <path>` fault-simulates the `--stimulus` patterns and writes
+  a coverage report, one line per fault class plus a summary, e.g.
+  `n1/out/SA0: detected by pattern 0` and `coverage: 12/22 (54.5%)`.
+  Requires `--stimulus` to supply the patterns.
 
 Example, using the bundled ISCAS c17 benchmark fixture:
 

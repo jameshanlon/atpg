@@ -1,12 +1,15 @@
 #include "atpg/fault/Fault.hpp"
 #include "atpg/fault/FaultList.hpp"
 #include "atpg/fsim/FaultSim.hpp"
+#include "atpg/gen/TestGen.hpp"
 #include "atpg/ir/Graph.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <cstddef>
 #include <vector>
+
+#include "../Test.hpp"
 
 using namespace atpg::fault;
 using namespace atpg::fsim;
@@ -404,4 +407,32 @@ TEST_CASE("the first detecting pattern is reported, not a later one", "[FaultSim
   REQUIRE(result.value().size() == 1);
   CHECK(result.value().begin()->detected == true);
   CHECK(result.value().begin()->firstDetectingPattern == 70);
+}
+
+TEST_CASE("c17's generated patterns achieve full fault coverage", "[FaultSim]") {
+  // Closed loop across two independently built modules: every c17 fault
+  // class is testable, and generateTests produced each pattern specifically
+  // to detect its own fault, so simulating that pattern set must detect
+  // everything. Anything less means one of the two modules is wrong.
+  auto graph = buildTestGraphFromFile(std::string(ATPG_TEST_DATA_DIR) + "/c17.sv", "c17");
+  REQUIRE(graph.levelize().ok());
+
+  const FaultList faults = generateFaultList(graph);
+  const atpg::Result<atpg::gen::TestSet> tests = atpg::gen::generateTests(graph, faults);
+  REQUIRE(tests.ok());
+
+  std::vector<std::vector<bool>> patterns;
+  for (const atpg::gen::TestResult& test : tests.value()) {
+    REQUIRE(test.outcome == atpg::gen::TestOutcome::Testable);
+    patterns.push_back(test.pattern);
+  }
+
+  const atpg::Result<SimResult> results = simulateFaults(graph, faults, patterns);
+  REQUIRE(results.ok());
+  REQUIRE(results.value().size() == faults.size());
+  for (const FaultStatus& status : results.value()) {
+    INFO("fault on gate " << status.fault.pin.gate);
+    CHECK(status.detected == true);
+  }
+  CHECK(results.value().coverage() == 1.0);
 }
