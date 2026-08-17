@@ -357,15 +357,32 @@ TEST_CASE("detection is reported at the correct index across packet boundaries",
 }
 
 TEST_CASE("padding lanes in a partial final packet do not report detections", "[FaultSim]") {
-  // Pattern counts that leave a partially filled final packet, with no
-  // pattern detecting the fault. If the active-pattern mask is wrong, the
-  // unused high lanes read as zeros and would expose the stuck-at-0 fault.
+  // Pattern counts that leave a partially filled final packet, with no real
+  // pattern detecting the fault.
+  //
+  // The fault must be SA1 here, not SA0: unused lanes hold zeros, so a
+  // stuck-at-0 agrees with the good circuit even in padding, and the test
+  // could not tell a broken active-pattern mask from a working one. With
+  // SA1, padding lanes have good == 0 and faulty == 1, so a mask that fails
+  // to exclude them reports a detection no real pattern produced.
   for (const std::size_t total :
        {std::size_t{1}, std::size_t{63}, std::size_t{65}, std::size_t{100}, std::size_t{129}}) {
-    BufFixture fixture = makeBufFixture();
-    const std::vector<std::vector<bool>> patterns(total, std::vector<bool>{false});
+    Graph graph;
+    const GateId a = graph.addGate(GateType::Pi, "a");
+    const GateId g = graph.addGate(GateType::Buf, "g");
+    const GateId y = graph.addGate(GateType::Po, "y");
+    graph.addEdge(a, g);
+    graph.addEdge(g, y);
+    REQUIRE(graph.levelize().ok());
 
-    const atpg::Result<SimResult> result = simulateFaults(fixture.graph, fixture.faults, patterns);
+    FaultList faults;
+    faults.add(FaultClass{Fault{PinRef{g, PinKind::Output, 0}, StuckValue::SA1}, {}});
+
+    // Every real pattern drives a=1, so the good output is already 1 and
+    // stuck-at-1 is invisible on all of them.
+    const std::vector<std::vector<bool>> patterns(total, std::vector<bool>{true});
+
+    const atpg::Result<SimResult> result = simulateFaults(graph, faults, patterns);
     INFO("total=" << total);
     REQUIRE(result.ok());
     REQUIRE(result.value().size() == 1);
