@@ -22,7 +22,11 @@ SystemVerilog frontend.
 - **Test generation** (`atpg::gen`): generates a detecting test pattern
   for every fault class in the collapsed fault list (or proves it
   redundant, or reports that the per-fault solver time limit was
-  exhausted) via a CP-SAT miter formulation.
+  exhausted) via a CP-SAT miter formulation. Also offers a
+  generate-and-drop loop, which fault-simulates each generated pattern to
+  skip the solver entirely for every fault that pattern already covers -
+  the same verdicts from a fraction of the solver calls, and a much
+  smaller pattern set.
 - **Fault simulation** (`atpg::fsim`): given a pattern set, reports which
   fault classes it detects, which pattern detected each one first, and the
   overall coverage. Bit-parallel: 64 patterns are evaluated per machine
@@ -60,7 +64,7 @@ ctest --test-dir build
 ## Usage
 
 ```sh
-atpg <file.sv> --top <module> [--dump-graph out.dot] [--dump-faults out.txt] [--generate-tests out.txt] [--time-limit seconds] [--stimulus vectors.txt] [--fault-sim out.txt]
+atpg <file.sv> --top <module> [--dump-graph out.dot] [--dump-faults out.txt] [--generate-tests out.txt] [--time-limit seconds] [--stimulus vectors.txt] [--fault-sim out.txt] [--drop]
 ```
 
 - `--dump-graph <path>` writes the flattened gate graph as Graphviz dot.
@@ -69,6 +73,11 @@ atpg <file.sv> --top <module> [--dump-graph out.dot] [--dump-faults out.txt] [--
 - `--generate-tests <path>` writes a generated test pattern (or
   `redundant`/`aborted`) per fault class to a file, one line per fault,
   e.g. `n1/out/SA1: testable 10110`.
+- `--drop` makes `--generate-tests` use the generate-and-drop loop:
+  each generated pattern is fault-simulated so faults it already covers
+  never reach the solver. Same per-fault outcomes, far fewer solver calls
+  (8 rather than 22 on c17), plus a summary line reporting the saving.
+  Requires `--generate-tests`.
 - `--time-limit <seconds>` sets the per-fault CP-SAT solver time limit
   used by `--generate-tests` (default 5 seconds).
 - `--stimulus <path>` reads newline-separated `0`/`1` vectors (one bit per
@@ -95,6 +104,8 @@ src/            implementation, mirrors include/atpg/
   ir/           the gate-graph data model
   sim/          logic simulation
   fault/        fault-list generation and collapsing
+  gen/          SAT-based test generation, with and without fault dropping
+  fsim/         bit-parallel fault simulation
 tests/
   unit/         Catch2 tests, mirrors src/
   data/         hand-verifiable .sv fixtures (half adder, full adder, c17)
@@ -102,7 +113,8 @@ tests/
 
 Everything lives in one `atpg-core` static library and the `atpg`
 namespace, split into sub-namespaces by module (`atpg::ir`, `atpg::sim`,
-`atpg::frontend`, `atpg::fault`) rather than separate CMake targets.
+`atpg::frontend`, `atpg::fault`, `atpg::gen`, `atpg::fsim`) rather than
+separate CMake targets.
 
 Error handling is exception-free throughout: fallible functions return
 `atpg::Result<T>` or `atpg::Status` (see `include/atpg/Result.hpp`). See

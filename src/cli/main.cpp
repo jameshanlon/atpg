@@ -80,6 +80,40 @@ void writeTests(const atpg::ir::Graph& graph, const atpg::gen::TestSet& tests, s
   }
 }
 
+void writePlan(const atpg::ir::Graph& graph, const atpg::gen::TestPlan& plan, std::ostream& os) {
+  std::size_t unsolvable = 0;
+  for (const atpg::gen::FaultResolution& resolution : plan.resolutions()) {
+    fmt::print(os, "{}: ", describeFault(graph, resolution.fault));
+    switch (resolution.outcome) {
+      case atpg::gen::TestOutcome::Testable: {
+        const std::vector<bool>& pattern = plan.patterns()[resolution.patternIndex];
+        std::string bits;
+        bits.reserve(pattern.size());
+        for (const bool bit : pattern) {
+          bits.push_back(bit ? '1' : '0');
+        }
+        fmt::print(os, "testable {}\n", bits);
+        break;
+      }
+      case atpg::gen::TestOutcome::Redundant:
+        fmt::print(os, "redundant\n");
+        ++unsolvable;
+        break;
+      case atpg::gen::TestOutcome::Aborted:
+        fmt::print(os, "aborted\n");
+        ++unsolvable;
+        break;
+    }
+  }
+
+  // Each pattern cost exactly one solver call, and so did each redundant or
+  // aborted fault; every other fault was dropped by simulation for free.
+  const std::size_t solverCalls = plan.patterns().size() + unsolvable;
+  fmt::print(os, "patterns: {}; solver calls: {} of {} fault classes ({} avoided)\n",
+             plan.patterns().size(), solverCalls, plan.resolutions().size(),
+             plan.resolutions().size() - solverCalls);
+}
+
 /// Reads a stimulus file into one pattern per non-blank line, each holding
 /// one bit per primary input. Characters other than '0'/'1' are ignored.
 atpg::Result<std::vector<std::vector<bool>>> readStimulus(const std::string& path) {
@@ -149,6 +183,7 @@ int main(int argc, char** argv) {
   std::string dumpFaultsPath;
   std::string stimulusPath;
   std::string faultSimPath;
+  bool dropEnabled = false;
   std::string generateTestsPath;
   double timeLimitSeconds = atpg::gen::Options{}.timeLimitSeconds;
 
@@ -162,6 +197,9 @@ int main(int argc, char** argv) {
                  "Write a generated test pattern (or redundant/aborted) per fault to a file");
   app.add_option("--time-limit", timeLimitSeconds, "Per-fault CP-SAT solver time limit in seconds")
       ->check(CLI::PositiveNumber);
+  app.add_flag("--drop", dropEnabled,
+               "Use the generate-and-drop loop for --generate-tests, fault-simulating each "
+               "pattern to skip solver calls for faults it already covers");
   app.add_option("--fault-sim", faultSimPath,
                  "Fault-simulate the --stimulus patterns and write a coverage report");
   app.add_option("--stimulus", stimulusPath,
@@ -214,6 +252,11 @@ int main(int argc, char** argv) {
     writeFaultList(graph, atpg::fault::generateFaultList(graph), ofs);
   }
 
+  if (dropEnabled && generateTestsPath.empty()) {
+    fmt::print(stderr, "error: --drop requires --generate-tests\n");
+    return 1;
+  }
+
   if (!generateTestsPath.empty()) {
     std::ofstream ofs(generateTestsPath);
     if (!ofs) {
@@ -222,13 +265,25 @@ int main(int argc, char** argv) {
     }
     atpg::gen::Options options;
     options.timeLimitSeconds = timeLimitSeconds;
-    const atpg::Result<atpg::gen::TestSet> testsResult =
-        atpg::gen::generateTests(graph, atpg::fault::generateFaultList(graph), options);
-    if (!testsResult) {
-      fmt::print(stderr, "error: {}\n", testsResult.error());
-      return 1;
+    const atpg::fault::FaultList faultList = atpg::fault::generateFaultList(graph);
+
+    if (dropEnabled) {
+      const atpg::Result<atpg::gen::TestPlan> planResult =
+          atpg::gen::generateTestsWithDropping(graph, faultList, options);
+      if (!planResult) {
+        fmt::print(stderr, "error: {}\n", planResult.error());
+        return 1;
+      }
+      writePlan(graph, planResult.value(), ofs);
+    } else {
+      const atpg::Result<atpg::gen::TestSet> testsResult =
+          atpg::gen::generateTests(graph, faultList, options);
+      if (!testsResult) {
+        fmt::print(stderr, "error: {}\n", testsResult.error());
+        return 1;
+      }
+      writeTests(graph, testsResult.value(), ofs);
     }
-    writeTests(graph, testsResult.value(), ofs);
   }
 
   if (!faultSimPath.empty()) {

@@ -9,9 +9,11 @@ slang-based SystemVerilog frontend flattens a gate-primitive netlist into
 `atpg::ir::Graph`, `atpg::sim` simulates it, `atpg::fault` generates and
 collapses its stuck-at fault list, `atpg::gen` generates (or proves
 redundant) a test pattern per fault class using a SAT-based miter
-construction on OR-Tools CP-SAT, and `atpg::fsim` bit-parallel
-fault-simulates a pattern set to report coverage. See `README.md` for
-build/usage and architecture details.
+construction on OR-Tools CP-SAT - either solving every fault
+independently, or running a generate-and-drop loop that uses `atpg::fsim`
+to skip faults an earlier pattern already covers - and `atpg::fsim`
+bit-parallel fault-simulates a pattern set to report coverage. See
+`README.md` for build/usage and architecture details.
 
 ## Error handling
 
