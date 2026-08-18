@@ -23,6 +23,8 @@
 // permanently leaving CHECK undefined and breaking every CHECK() below.
 #include "../Test.hpp"
 
+#include <algorithm>
+
 using operations_research::sat::BoolVar;
 using operations_research::sat::CpModelBuilder;
 using operations_research::sat::CpSolverResponse;
@@ -364,4 +366,132 @@ TEST_CASE("TestPlan stores patterns and resolutions independently", "[TestGen]")
   CHECK(plan.resolutions()[0].outcome == TestOutcome::Testable);
   CHECK(plan.resolutions()[0].patternIndex == 1);
   CHECK(plan.resolutions()[1].outcome == TestOutcome::Redundant);
+}
+
+TEST_CASE("one pattern resolves several fault classes", "[TestGen]") {
+  // A half adder: a and b are fanout-2 stems feeding both outputs, so a
+  // single stimulus exposes many faults at once and dropping has real work
+  // to do. (A plain Buf chain would not do: collapsing reduces it to one
+  // SA0 class and one SA1 class, which need a pattern each, so nothing is
+  // ever shared.)
+  //   a, b -> sumGate (Xor)  -> sum
+  //   a, b -> coutGate (And) -> cout
+  Graph graph;
+  const GateId a = graph.addGate(GateType::Pi, "a");
+  const GateId b = graph.addGate(GateType::Pi, "b");
+  const GateId sumGate = graph.addGate(GateType::Xor, "sumGate");
+  const GateId coutGate = graph.addGate(GateType::And, "coutGate");
+  const GateId sum = graph.addGate(GateType::Po, "sum");
+  const GateId cout = graph.addGate(GateType::Po, "cout");
+  graph.addEdge(a, sumGate);
+  graph.addEdge(b, sumGate);
+  graph.addEdge(a, coutGate);
+  graph.addEdge(b, coutGate);
+  graph.addEdge(sumGate, sum);
+  graph.addEdge(coutGate, cout);
+  REQUIRE(graph.levelize().ok());
+
+  const FaultList faults = generateFaultList(graph);
+  const atpg::Result<TestPlan> plan = generateTestsWithDropping(graph, faults);
+  REQUIRE(plan.ok());
+  REQUIRE(plan.value().resolutions().size() == faults.size());
+
+  std::size_t testable = 0;
+  for (const FaultResolution& r : plan.value().resolutions()) {
+    if (r.outcome == TestOutcome::Testable) {
+      ++testable;
+    }
+  }
+  REQUIRE(testable > 0);
+
+  // Dropping happened: fewer patterns than testable faults, and at least
+  // one pattern is shared by two or more faults.
+  CHECK(plan.value().patterns().size() < testable);
+
+  std::vector<std::size_t> usesPerPattern(plan.value().patterns().size(), 0);
+  for (const FaultResolution& r : plan.value().resolutions()) {
+    if (r.outcome == TestOutcome::Testable) {
+      REQUIRE(r.patternIndex < usesPerPattern.size());
+      ++usesPerPattern[r.patternIndex];
+    }
+  }
+  const bool anyShared = std::any_of(usesPerPattern.begin(), usesPerPattern.end(),
+                                     [](std::size_t uses) { return uses >= 2; });
+  CHECK(anyShared);
+}
+
+TEST_CASE("dropping reports the same outcomes as exhaustive generation", "[TestGen]") {
+  auto graph = buildTestGraphFromFile(std::string(ATPG_TEST_DATA_DIR) + "/c17.sv", "c17");
+  REQUIRE(graph.levelize().ok());
+  const FaultList faults = generateFaultList(graph);
+
+  const atpg::Result<TestSet> exhaustive = generateTests(graph, faults);
+  const atpg::Result<TestPlan> dropped = generateTestsWithDropping(graph, faults);
+  REQUIRE(exhaustive.ok());
+  REQUIRE(dropped.ok());
+
+  REQUIRE(dropped.value().resolutions().size() == exhaustive.value().size());
+
+  auto it = exhaustive.value().begin();
+  for (const FaultResolution& r : dropped.value().resolutions()) {
+    INFO("fault on gate " << r.fault.pin.gate);
+    CHECK(r.fault == it->fault);
+    CHECK(r.outcome == it->outcome);
+    ++it;
+  }
+
+  // c17 has fanout, so dropping must beat one-pattern-per-fault by a wide
+  // margin.
+  CHECK(dropped.value().patterns().size() < faults.size());
+}
+
+TEST_CASE("a redundant fault costs a solver call and produces no pattern", "[TestGen]") {
+  // y = (a AND b) OR (a AND NOT b), which simplifies to y == a, making
+  // g1's b-input stuck-at-1 undetectable. The same circuit is used by the
+  // redundancy test for generateTests.
+  Graph graph;
+  const GateId a = graph.addGate(GateType::Pi, "a");
+  const GateId b = graph.addGate(GateType::Pi, "b");
+  const GateId nb = graph.addGate(GateType::Not, "nb");
+  const GateId g1 = graph.addGate(GateType::And, "g1");
+  const GateId g2 = graph.addGate(GateType::And, "g2");
+  const GateId orGate = graph.addGate(GateType::Or, "orGate");
+  const GateId po = graph.addGate(GateType::Po, "po");
+  graph.addEdge(b, nb);
+  graph.addEdge(a, g1);
+  graph.addEdge(b, g1);
+  graph.addEdge(a, g2);
+  graph.addEdge(nb, g2);
+  graph.addEdge(g1, orGate);
+  graph.addEdge(g2, orGate);
+  graph.addEdge(orGate, po);
+  REQUIRE(graph.levelize().ok());
+
+  const FaultList faults = generateFaultList(graph);
+  const atpg::Result<TestPlan> plan = generateTestsWithDropping(graph, faults);
+  REQUIRE(plan.ok());
+
+  const Fault redundantFault{PinRef{g1, PinKind::Input, 1}, StuckValue::SA1};
+  bool found = false;
+  for (const FaultResolution& r : plan.value().resolutions()) {
+    if (r.fault == redundantFault) {
+      found = true;
+      CHECK(r.outcome == TestOutcome::Redundant);
+    }
+  }
+  REQUIRE(found);
+}
+
+TEST_CASE("generateTestsWithDropping rejects a negative time limit", "[TestGen]") {
+  Graph graph;
+  const GateId a = graph.addGate(GateType::Pi, "a");
+  const GateId g = graph.addGate(GateType::Buf, "g");
+  const GateId y = graph.addGate(GateType::Po, "y");
+  graph.addEdge(a, g);
+  graph.addEdge(g, y);
+  REQUIRE(graph.levelize().ok());
+
+  Options options;
+  options.timeLimitSeconds = -1.0;
+  CHECK_FALSE(generateTestsWithDropping(graph, generateFaultList(graph), options).ok());
 }

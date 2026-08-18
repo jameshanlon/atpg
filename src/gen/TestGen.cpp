@@ -1,5 +1,6 @@
 #include "atpg/gen/TestGen.hpp"
 
+#include "atpg/fsim/FaultSim.hpp"
 #include "atpg/sim/LogicSim.hpp"
 
 #include <fmt/format.h>
@@ -9,6 +10,7 @@
 #include "ortools/sat/cp_model_solver.h"
 #include "ortools/sat/sat_parameters.pb.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -238,6 +240,27 @@ Result<TestResult> generateOne(const ir::Graph& graph, const fault::Fault& fault
   return result;
 }
 
+/// Confirms `pattern` really does expose `fault` at a primary output.
+///
+/// Fault simulation is what claimed it does; this re-checks with the scalar
+/// simulator before a fault is dropped without ever being handed to the
+/// solver. A false detection here would silently overstate coverage, and a
+/// differential test against generateTests could not catch it - both would
+/// report Testable, just for different reasons.
+Status verifyDetects(const ir::Graph& graph, const std::vector<bool>& pattern,
+                     const std::vector<bool>& goodOutputs, const fault::Fault& fault) {
+  ATPG_ASSIGN_OR_RETURN(const std::vector<bool> faultyOutputs,
+                        sim::simulateWithFault(graph, pattern, fault.pin, fault.value));
+  if (goodOutputs == faultyOutputs) {
+    return Error(fmt::format(
+        "generateTestsWithDropping: fault simulation reported a detection on gate {} that "
+        "independent simulation disagrees with - this is a bug in atpg's fault simulator "
+        "or its SAT encoding, not in the caller's input",
+        fault.pin.gate));
+  }
+  return {};
+}
+
 } // namespace
 
 Result<TestSet> generateTests(const ir::Graph& graph, const fault::FaultList& faults,
@@ -254,6 +277,83 @@ Result<TestSet> generateTests(const ir::Graph& graph, const fault::FaultList& fa
     results.add(std::move(result));
   }
   return results;
+}
+
+Result<TestPlan> generateTestsWithDropping(const ir::Graph& graph, const fault::FaultList& faults,
+                                           Options options) {
+  if (options.timeLimitSeconds < 0.0) {
+    return Error(fmt::format("generateTestsWithDropping: options.timeLimitSeconds must not be "
+                             "negative, got {}",
+                             options.timeLimitSeconds));
+  }
+
+  std::vector<fault::Fault> representatives;
+  for (const auto& faultClass : faults) {
+    representatives.push_back(faultClass.representative);
+  }
+
+  std::vector<FaultResolution> resolutions(representatives.size());
+  std::vector<char> resolved(representatives.size(), 0);
+  for (std::size_t i = 0; i < representatives.size(); ++i) {
+    resolutions[i].fault = representatives[i];
+  }
+
+  TestPlan plan;
+
+  for (std::size_t i = 0; i < representatives.size(); ++i) {
+    if (resolved[i] != 0) {
+      continue; // dropped by an earlier pattern - no solver call needed
+    }
+
+    ATPG_ASSIGN_OR_RETURN(TestResult result, generateOne(graph, representatives[i], options));
+    resolutions[i].outcome = result.outcome;
+    resolved[i] = 1;
+
+    if (result.outcome != TestOutcome::Testable) {
+      continue; // redundant or aborted: no pattern, nothing to drop with
+    }
+
+    const std::size_t patternIndex = plan.patterns().size();
+    resolutions[i].patternIndex = patternIndex;
+    plan.addPattern(result.pattern);
+
+    // Everything before i is already resolved: the loop resolves each fault
+    // it reaches, so only later indices can still be open.
+    fault::FaultList remaining;
+    std::vector<std::size_t> remainingIndex;
+    for (std::size_t j = i + 1; j < representatives.size(); ++j) {
+      if (resolved[j] == 0) {
+        remaining.add(fault::FaultClass{representatives[j], {}});
+        remainingIndex.push_back(j);
+      }
+    }
+    if (remainingIndex.empty()) {
+      continue;
+    }
+
+    ATPG_ASSIGN_OR_RETURN(const fsim::SimResult detected,
+                          fsim::simulateFaults(graph, remaining, {result.pattern}));
+    ATPG_ASSIGN_OR_RETURN(const std::vector<bool> goodOutputs,
+                          sim::simulate(graph, result.pattern));
+
+    std::size_t k = 0;
+    for (const fsim::FaultStatus& status : detected) {
+      const std::size_t j = remainingIndex[k];
+      ++k;
+      if (!status.detected) {
+        continue;
+      }
+      ATPG_RETURN_IF_ERROR(verifyDetects(graph, result.pattern, goodOutputs, representatives[j]));
+      resolutions[j].outcome = TestOutcome::Testable;
+      resolutions[j].patternIndex = patternIndex;
+      resolved[j] = 1;
+    }
+  }
+
+  for (FaultResolution& resolution : resolutions) {
+    plan.addResolution(std::move(resolution));
+  }
+  return plan;
 }
 
 } // namespace atpg::gen
