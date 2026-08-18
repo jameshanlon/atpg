@@ -19,26 +19,33 @@ using namespace atpg::testing;
 
 namespace {
 
-std::vector<std::string> checkAgainstExhaustive(const Graph& graph) {
+struct CheckOutcome {
   std::vector<std::string> violations;
+  std::size_t patternCount = 0;
+  std::size_t testableCount = 0;
+};
+
+CheckOutcome checkAgainstExhaustive(const Graph& graph) {
+  CheckOutcome outcome;
+  std::vector<std::string>& violations = outcome.violations;
 
   const FaultList faults = generateFaultList(graph);
 
   const atpg::Result<TestSet> exhaustive = generateTests(graph, faults);
   if (!exhaustive.ok()) {
     violations.push_back("generateTests returned an error: " + exhaustive.error());
-    return violations;
+    return outcome;
   }
   const atpg::Result<TestPlan> dropped = generateTestsWithDropping(graph, faults);
   if (!dropped.ok()) {
     violations.push_back("generateTestsWithDropping returned an error: " + dropped.error());
-    return violations;
+    return outcome;
   }
   const TestPlan& plan = dropped.value();
 
   if (plan.resolutions().size() != exhaustive.value().size()) {
     violations.push_back("resolution count does not match the exhaustive result count");
-    return violations;
+    return outcome;
   }
 
   const std::vector<int> piIndex = primaryInputIndex(graph);
@@ -49,7 +56,7 @@ std::vector<std::string> checkAgainstExhaustive(const Graph& graph) {
   for (const FaultResolution& resolution : plan.resolutions()) {
     if (keyOf(resolution.fault) != keyOf(it->fault)) {
       violations.push_back("resolutions are not in the input fault list's order");
-      return violations;
+      return outcome;
     }
     if (resolution.outcome != it->outcome) {
       violations.push_back("dropping and exhaustive generation disagree on a fault's outcome");
@@ -80,15 +87,34 @@ std::vector<std::string> checkAgainstExhaustive(const Graph& graph) {
     if (good == faulty) {
       violations.push_back("the pattern a fault points at does not actually detect it");
     }
+
+    // Dropping must be *complete*, not merely sound: this fault must point
+    // at the earliest pattern that detects it. The loop drops every fault a
+    // new pattern covers before generating the next one, so an earlier
+    // pattern detecting this fault would mean the loop failed to drop it
+    // and paid for a solver call it did not need.
+    //
+    // This is the only assertion here that fails when the loop under-drops.
+    // Outcome agreement and "the pattern really detects it" are both
+    // satisfied by a loop that drops nothing at all, so without this the
+    // milestone's entire point could regress with the suite still green.
+    for (std::size_t earlier = 0; earlier < resolution.patternIndex; ++earlier) {
+      const std::vector<bool>& other = plan.patterns()[earlier];
+      const std::vector<bool> otherGood = simulate(graph, piIndex, other, InjectedFault{});
+      const std::vector<bool> otherFaulty =
+          simulate(graph, piIndex, other, injectedFrom(resolution.fault));
+      if (otherGood != otherFaulty) {
+        violations.push_back("an earlier pattern already detects this fault - it should have "
+                             "been dropped rather than given its own pattern");
+        break;
+      }
+    }
   }
 
-  // Dropping must actually happen - a loop that silently never drops
-  // anything would satisfy everything above.
-  if (plan.patterns().size() > testableCount) {
-    violations.push_back("more patterns than testable faults");
-  }
+  outcome.patternCount = plan.patterns().size();
+  outcome.testableCount = testableCount;
 
-  return violations;
+  return outcome;
 }
 
 } // namespace
@@ -108,30 +134,23 @@ TEST_CASE("dropping agrees with exhaustive generation on random circuits", "[Tes
     Graph graph = randomCircuit(rng);
     REQUIRE(graph.levelize().ok());
 
-    const std::vector<std::string> violations = checkAgainstExhaustive(graph);
-    if (!violations.empty()) {
+    const CheckOutcome outcome = checkAgainstExhaustive(graph);
+    if (!outcome.violations.empty()) {
       INFO("circuit #" << i << " (seed " << kSeed << "):\n" << dumpCircuit(graph));
-      for (const auto& violation : violations) {
+      for (const auto& violation : outcome.violations) {
         INFO(violation);
       }
       FAIL("generateTestsWithDropping disagreed with generateTests");
     }
-
-    const FaultList faults = generateFaultList(graph);
-    const atpg::Result<TestPlan> plan = generateTestsWithDropping(graph, faults);
-    REQUIRE(plan.ok());
-    totalPatterns += plan.value().patterns().size();
-    for (const FaultResolution& r : plan.value().resolutions()) {
-      if (r.outcome == TestOutcome::Testable) {
-        ++totalTestable;
-      }
-    }
+    totalPatterns += outcome.patternCount;
+    totalTestable += outcome.testableCount;
   }
 
   // Dropping, in aggregate: across a corpus with real fanout, it must
-  // produce materially fewer patterns than testable faults. A per-circuit
-  // strict inequality would be flaky (a tiny circuit can legitimately need
-  // one pattern per fault), but over the whole corpus the gap is large.
+  // produce materially fewer patterns than testable faults. The
+  // earliest-pattern check inside checkAgainstExhaustive is what actually
+  // guards completeness fault-by-fault; this is a cheap corpus-level sanity
+  // bound on top of it.
   INFO("patterns=" << totalPatterns << " testable=" << totalTestable);
   CHECK(totalPatterns * 2 < totalTestable);
 }

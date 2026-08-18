@@ -75,9 +75,11 @@ atpg <file.sv> --top <module> [--dump-graph out.dot] [--dump-faults out.txt] [--
   e.g. `n1/out/SA1: testable 10110`.
 - `--drop` makes `--generate-tests` use the generate-and-drop loop:
   each generated pattern is fault-simulated so faults it already covers
-  never reach the solver. Same per-fault outcomes, far fewer solver calls
-  (8 rather than 22 on c17), plus a summary line reporting the saving.
-  Requires `--generate-tests`.
+  never reach the solver. Far fewer solver calls (8 rather than 22 on
+  c17), plus a summary line reporting the saving. Outcomes match the
+  exhaustive path, except that a dropped fault is reported `testable`
+  even where the solver would have hit `--time-limit` and reported
+  `aborted`. Requires `--generate-tests`.
 - `--time-limit <seconds>` sets the per-fault CP-SAT solver time limit
   used by `--generate-tests` (default 5 seconds).
 - `--stimulus <path>` reads newline-separated `0`/`1` vectors (one bit per

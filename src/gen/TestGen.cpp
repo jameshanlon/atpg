@@ -12,6 +12,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace atpg::gen {
@@ -253,10 +254,13 @@ Status verifyDetects(const ir::Graph& graph, const std::vector<bool>& pattern,
                         sim::simulateWithFault(graph, pattern, fault.pin, fault.value));
   if (goodOutputs == faultyOutputs) {
     return Error(fmt::format(
-        "generateTestsWithDropping: fault simulation reported a detection on gate {} that "
+        "generateTestsWithDropping: fault simulation reported a detection of {}/{}{}/{} that "
         "independent simulation disagrees with - this is a bug in atpg's fault simulator "
         "or its SAT encoding, not in the caller's input",
-        fault.pin.gate));
+        fault.pin.gate, fault.pin.kind == fault::PinKind::Output ? "out" : "in",
+        fault.pin.kind == fault::PinKind::Output ? std::string()
+                                                 : std::to_string(fault.pin.inputIndex),
+        fault.value == fault::StuckValue::SA0 ? "SA0" : "SA1"));
   }
   return {};
 }
@@ -338,8 +342,21 @@ Result<TestPlan> generateTestsWithDropping(const ir::Graph& graph, const fault::
 
     std::size_t k = 0;
     for (const fsim::FaultStatus& status : detected) {
+      if (k >= remainingIndex.size()) {
+        return Error("generateTestsWithDropping: fault simulation returned more results than "
+                     "faults it was given");
+      }
       const std::size_t j = remainingIndex[k];
       ++k;
+      // The whole drop step rests on simulateFaults reporting results in the
+      // order of the FaultList it was handed. That holds structurally, but a
+      // silent drift would attribute detections to the wrong faults - and
+      // those faults are usually still plausibly Testable, so the outcome
+      // comparison against generateTests would not notice. Check it here
+      // rather than trust it.
+      if (!(status.fault == representatives[j])) {
+        return Error("generateTestsWithDropping: fault simulation returned results out of order");
+      }
       if (!status.detected) {
         continue;
       }

@@ -7,12 +7,12 @@ Project-specific rules for atpg, in addition to global CLAUDE.md rules.
 atpg is a gate-level ATPG (Automatic Test Pattern Generation) tool: a
 slang-based SystemVerilog frontend flattens a gate-primitive netlist into
 `atpg::ir::Graph`, `atpg::sim` simulates it, `atpg::fault` generates and
-collapses its stuck-at fault list, `atpg::gen` generates (or proves
-redundant) a test pattern per fault class using a SAT-based miter
-construction on OR-Tools CP-SAT - either solving every fault
-independently, or running a generate-and-drop loop that uses `atpg::fsim`
-to skip faults an earlier pattern already covers - and `atpg::fsim`
-bit-parallel fault-simulates a pattern set to report coverage. See
+collapses its stuck-at fault list, `atpg::fsim` bit-parallel
+fault-simulates a pattern set to report coverage, and `atpg::gen`
+generates (or proves redundant) a test pattern per fault class using a
+SAT-based miter construction on OR-Tools CP-SAT - either solving every
+fault independently, or running a generate-and-drop loop that fault-
+simulates each pattern to skip the faults it already covers. See
 `README.md` for build/usage and architecture details.
 
 ## Error handling

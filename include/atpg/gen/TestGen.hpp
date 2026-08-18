@@ -105,8 +105,15 @@ Result<TestSet> generateTests(const ir::Graph& graph, const fault::FaultList& fa
 /// Walks `faults` in order; for each class not already resolved, solves it
 /// with the SAT engine, then fault-simulates the resulting pattern against
 /// the remaining unresolved faults and marks every fault it also detects as
-/// Testable sharing that pattern. Outcomes match generateTests exactly -
-/// dropping changes how a fault is resolved, never whether it is.
+/// Testable sharing that pattern.
+///
+/// Outcomes match generateTests, with one asymmetry: a fault dropped by
+/// simulation never reaches the solver, so it is reported Testable even
+/// where generateTests would have exhausted its time limit and reported
+/// Aborted. The difference only ever runs that way - dropping can turn an
+/// Aborted into a Testable, never the reverse, and a Redundant fault is
+/// never dropped, since only a pattern that actually detects a fault can
+/// drop it.
 ///
 /// `graph` must already be levelized (graph.levelize() called and ok()).
 ///
