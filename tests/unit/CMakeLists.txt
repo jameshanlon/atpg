@@ -8,6 +8,7 @@ add_executable(
   fault/FaultListPropertyTests.cpp
   gen/TestGenTests.cpp
   gen/TestGenPropertyTests.cpp
+  gen/TestGenDroppingPropertyTests.cpp
   fsim/FaultSimTests.cpp
   fsim/FaultSimPropertyTests.cpp)
 
