@@ -49,6 +49,42 @@ private:
   std::vector<TestResult> results_;
 };
 
+/// How one fault class was resolved by the generate-and-drop loop.
+struct FaultResolution {
+  /// The fault class's representative.
+  fault::Fault fault;
+  TestOutcome outcome = TestOutcome::Aborted;
+  /// Index into TestPlan::patterns() of a pattern that detects this fault.
+  /// Only meaningful when `outcome == TestOutcome::Testable`. Many faults
+  /// share an index: that is the point of the loop.
+  std::size_t patternIndex = 0;
+};
+
+/// The pattern set produced by the generate-and-drop loop, plus how each
+/// fault class was resolved.
+///
+/// Two named accessors rather than the size()/begin()/end() shape used by
+/// TestSet and FaultList: this holds two collections, so a bare begin()
+/// would be ambiguous about which one it iterates.
+class TestPlan {
+public:
+  /// Appends a generated pattern.
+  void addPattern(std::vector<bool> pattern) { patterns_.push_back(std::move(pattern)); }
+  /// Appends one fault class's resolution.
+  void addResolution(FaultResolution resolution) { resolutions_.push_back(std::move(resolution)); }
+
+  /// Generated patterns, in generation order. Normally far fewer than the
+  /// fault count, since one pattern typically resolves many faults.
+  const std::vector<std::vector<bool>>& patterns() const { return patterns_; }
+
+  /// One entry per fault class, in the input FaultList's order.
+  const std::vector<FaultResolution>& resolutions() const { return resolutions_; }
+
+private:
+  std::vector<std::vector<bool>> patterns_;
+  std::vector<FaultResolution> resolutions_;
+};
+
 /// Generates a test pattern for every fault class's representative fault in
 /// `faults` (or determines it's redundant, or aborts within
 /// options.timeLimitSeconds) using a SAT-based miter construction. `graph`
@@ -63,5 +99,24 @@ private:
 /// encoding itself, not in the caller's input.
 Result<TestSet> generateTests(const ir::Graph& graph, const fault::FaultList& faults,
                               Options options = {});
+
+/// Same result as generateTests, reached with far fewer solver calls.
+///
+/// Walks `faults` in order; for each class not already resolved, solves it
+/// with the SAT engine, then fault-simulates the resulting pattern against
+/// the remaining unresolved faults and marks every fault it also detects as
+/// Testable sharing that pattern. Outcomes match generateTests exactly -
+/// dropping changes how a fault is resolved, never whether it is.
+///
+/// `graph` must already be levelized (graph.levelize() called and ok()).
+///
+/// Returns an Error for an invalid argument (e.g. a negative
+/// `options.timeLimitSeconds`), for any error propagated out of the SAT
+/// engine or the fault simulator, or if a fault the simulator reported as
+/// detected turns out not to be detected by that pattern under independent
+/// simulation - the last of these should never happen and indicates a bug
+/// in atpg rather than in the caller's input.
+Result<TestPlan> generateTestsWithDropping(const ir::Graph& graph, const fault::FaultList& faults,
+                                           Options options = {});
 
 } // namespace atpg::gen

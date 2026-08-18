@@ -341,3 +341,27 @@ TEST_CASE("generateTests produces a genuinely detecting pattern for every c17 fa
     CHECK(good.value() != faulted.value());
   }
 }
+
+TEST_CASE("TestPlan stores patterns and resolutions independently", "[TestGen]") {
+  TestPlan plan;
+  CHECK(plan.patterns().empty());
+  CHECK(plan.resolutions().empty());
+
+  plan.addPattern({true, false});
+  plan.addPattern({false, true});
+
+  const Fault f1{PinRef{0, PinKind::Output, 0}, StuckValue::SA0};
+  const Fault f2{PinRef{1, PinKind::Output, 0}, StuckValue::SA1};
+  plan.addResolution(FaultResolution{f1, TestOutcome::Testable, 1});
+  plan.addResolution(FaultResolution{f2, TestOutcome::Redundant, 0});
+
+  REQUIRE(plan.patterns().size() == 2);
+  CHECK(plan.patterns()[0] == std::vector<bool>{true, false});
+  CHECK(plan.patterns()[1] == std::vector<bool>{false, true});
+
+  REQUIRE(plan.resolutions().size() == 2);
+  CHECK(plan.resolutions()[0].fault == f1);
+  CHECK(plan.resolutions()[0].outcome == TestOutcome::Testable);
+  CHECK(plan.resolutions()[0].patternIndex == 1);
+  CHECK(plan.resolutions()[1].outcome == TestOutcome::Redundant);
+}
