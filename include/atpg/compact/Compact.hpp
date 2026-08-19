@@ -36,6 +36,13 @@ struct CompactResult {
 /// coverage nor gains it. `graph` must already be levelized
 /// (graph.levelize() called and ok()).
 ///
+/// Cost is set for correctness and clarity over scale: it holds a full
+/// fault-by-pattern bit matrix plus an index-per-detection transposition of
+/// it, and the greedy loop rescans every unselected pattern each round. That
+/// is comfortable for the pattern sets this project generates and would want
+/// revisiting - an exact CP-SAT covering formulation is the natural
+/// replacement - before pointing it at a large industrial netlist.
+///
 /// Returns an Error if any pattern's width does not match the primary-input
 /// count, or if the compacted set fails the internal check that it preserves
 /// the input set's coverage - the latter should never happen and would

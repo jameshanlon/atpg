@@ -526,7 +526,12 @@ TEST_CASE("only a fault class's representative is simulated, never its equivalen
 
 namespace {
 
-/// A 2-input OR driving one primary output, with the OR at gate id 2.
+/// The gate driving `graph`'s first primary output.
+GateId outputDriver(const Graph& graph) {
+  return graph.gate(graph.primaryOutputs().front()).fanin[0];
+}
+
+/// A 2-input OR driving one primary output.
 Graph orGraph() {
   Graph graph;
   const GateId a = graph.addGate(GateType::Pi, "a");
@@ -540,7 +545,7 @@ Graph orGraph() {
   return graph;
 }
 
-/// An inverter driving one primary output, with the inverter at gate id 1.
+/// An inverter driving one primary output.
 Graph notGraph() {
   Graph graph;
   const GateId a = graph.addGate(GateType::Pi, "a");
@@ -556,7 +561,7 @@ Graph notGraph() {
 
 TEST_CASE("detectAll records every detecting pattern, not just the first", "[FaultSim]") {
   const Graph graph = orGraph();
-  const GateId g = 2;
+  const GateId g = outputDriver(graph);
 
   FaultList faults;
   faults.add(FaultClass{Fault{PinRef{g, PinKind::Output, 0}, StuckValue::SA0}, {}});
@@ -582,7 +587,7 @@ TEST_CASE("detectAll records every detecting pattern, not just the first", "[Fau
 
 TEST_CASE("detectAll keeps each fault's row separate", "[FaultSim]") {
   const Graph graph = orGraph();
-  const GateId g = 2;
+  const GateId g = outputDriver(graph);
 
   FaultList faults;
   faults.add(FaultClass{Fault{PinRef{g, PinKind::Output, 0}, StuckValue::SA0}, {}});
@@ -606,7 +611,7 @@ TEST_CASE("detectAll keeps each fault's row separate", "[FaultSim]") {
 
 TEST_CASE("detectAll rejects a stimulus whose width does not match the inputs", "[FaultSim]") {
   const Graph graph = notGraph();
-  const GateId n = 1;
+  const GateId n = outputDriver(graph);
 
   FaultList faults;
   faults.add(FaultClass{Fault{PinRef{n, PinKind::Output, 0}, StuckValue::SA0}, {}});
@@ -617,7 +622,7 @@ TEST_CASE("detectAll rejects a stimulus whose width does not match the inputs", 
 
 TEST_CASE("detectAll over an empty pattern set yields a matrix with no columns", "[FaultSim]") {
   const Graph graph = notGraph();
-  const GateId n = 1;
+  const GateId n = outputDriver(graph);
 
   FaultList faults;
   faults.add(FaultClass{Fault{PinRef{n, PinKind::Output, 0}, StuckValue::SA0}, {}});

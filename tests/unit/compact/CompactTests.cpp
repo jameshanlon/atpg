@@ -19,7 +19,12 @@ using namespace atpg::ir;
 
 namespace {
 
-/// A 2-input AND driving one primary output. Gate ids: a=0, b=1, g=2, y=3.
+/// The gate driving `graph`'s first primary output.
+GateId outputDriver(const Graph& graph) {
+  return graph.gate(graph.primaryOutputs().front()).fanin[0];
+}
+
+/// A 2-input AND driving one primary output.
 Graph andGraph() {
   Graph graph;
   const GateId a = graph.addGate(GateType::Pi, "a");
@@ -39,11 +44,12 @@ Graph andGraph() {
 ///   g/in0/SA1  needs a=0 with b sensitising      -> 01
 ///   g/in1/SA1  needs b=0 with a sensitising      -> 10
 /// Pattern 00 therefore detects nothing at all.
-FaultList andFaults() {
+FaultList andFaults(const Graph& graph) {
+  const GateId g = outputDriver(graph);
   FaultList faults;
-  faults.add(FaultClass{Fault{PinRef{2, PinKind::Output, 0}, StuckValue::SA0}, {}});
-  faults.add(FaultClass{Fault{PinRef{2, PinKind::Input, 0}, StuckValue::SA1}, {}});
-  faults.add(FaultClass{Fault{PinRef{2, PinKind::Input, 1}, StuckValue::SA1}, {}});
+  faults.add(FaultClass{Fault{PinRef{g, PinKind::Output, 0}, StuckValue::SA0}, {}});
+  faults.add(FaultClass{Fault{PinRef{g, PinKind::Input, 0}, StuckValue::SA1}, {}});
+  faults.add(FaultClass{Fault{PinRef{g, PinKind::Input, 1}, StuckValue::SA1}, {}});
   return faults;
 }
 
@@ -51,7 +57,7 @@ FaultList andFaults() {
 
 TEST_CASE("compact drops a pattern that detects nothing", "[Compact]") {
   const Graph graph = andGraph();
-  const FaultList faults = andFaults();
+  const FaultList faults = andFaults(graph);
 
   const std::vector<std::vector<bool>> patterns = {
       {false, false}, {false, true}, {true, false}, {true, true}};
@@ -67,7 +73,7 @@ TEST_CASE("compact drops a pattern that detects nothing", "[Compact]") {
 
 TEST_CASE("compact drops a duplicated pattern", "[Compact]") {
   const Graph graph = andGraph();
-  const FaultList faults = andFaults();
+  const FaultList faults = andFaults(graph);
 
   // 11 appears twice; the second copy adds no coverage.
   const std::vector<std::vector<bool>> patterns = {
@@ -80,7 +86,7 @@ TEST_CASE("compact drops a duplicated pattern", "[Compact]") {
 
 TEST_CASE("compact keeps its result in the input's order", "[Compact]") {
   const Graph graph = andGraph();
-  const FaultList faults = andFaults();
+  const FaultList faults = andFaults(graph);
 
   const std::vector<std::vector<bool>> patterns = {
       {true, true}, {false, false}, {true, false}, {false, false}, {false, true}};
@@ -142,7 +148,7 @@ TEST_CASE("compact removes a greedily-selected pattern the rest already cover", 
 
 TEST_CASE("compact accepts an empty pattern set", "[Compact]") {
   const Graph graph = andGraph();
-  const FaultList faults = andFaults();
+  const FaultList faults = andFaults(graph);
 
   const atpg::Result<CompactResult> result = compact(graph, faults, {});
   REQUIRE(result.ok());
@@ -152,7 +158,7 @@ TEST_CASE("compact accepts an empty pattern set", "[Compact]") {
 
 TEST_CASE("compact rejects a pattern whose width does not match the inputs", "[Compact]") {
   const Graph graph = andGraph();
-  const FaultList faults = andFaults();
+  const FaultList faults = andFaults(graph);
 
   const atpg::Result<CompactResult> result = compact(graph, faults, {{true}});
   CHECK_FALSE(result.ok());

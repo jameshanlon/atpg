@@ -246,9 +246,13 @@ int main(int argc, char** argv) {
     writeDot(graph, ofs);
   }
 
-  // Every downstream stage wants the same collapsed list, so it is built once
-  // rather than re-derived per option.
-  const atpg::fault::FaultList faultList = atpg::fault::generateFaultList(graph);
+  // Every stage below wants the same collapsed list, so it is built once
+  // rather than re-derived per option - but not at all when no stage needs it,
+  // since collapsing is not free on a large design.
+  const bool needFaultList = !dumpFaultsPath.empty() || !generateTestsPath.empty() ||
+                             !faultSimPath.empty() || !compactPath.empty();
+  const atpg::fault::FaultList faultList =
+      needFaultList ? atpg::fault::generateFaultList(graph) : atpg::fault::FaultList{};
 
   if (!dumpFaultsPath.empty()) {
     std::ofstream ofs(dumpFaultsPath);
@@ -340,16 +344,18 @@ int main(int argc, char** argv) {
       patterns = std::move(stimulus.value());
     }
 
+    // Opened before the work, like every other output option: a bad path
+    // should not cost a full solver campaign before it is reported.
+    std::ofstream ofs(compactPath);
+    if (!ofs) {
+      fmt::print(stderr, "error: could not open {} for writing\n", compactPath);
+      return 1;
+    }
+
     const atpg::Result<atpg::compact::CompactResult> compacted =
         atpg::compact::compact(graph, faultList, patterns);
     if (!compacted) {
       fmt::print(stderr, "error: {}\n", compacted.error());
-      return 1;
-    }
-
-    std::ofstream ofs(compactPath);
-    if (!ofs) {
-      fmt::print(stderr, "error: could not open {} for writing\n", compactPath);
       return 1;
     }
     writePatterns(compacted.value().patterns, ofs);

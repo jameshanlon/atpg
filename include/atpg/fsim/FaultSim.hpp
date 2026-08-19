@@ -64,8 +64,6 @@ private:
 /// choose between patterns - see atpg::compact.
 class DetectionMatrix {
 public:
-  DetectionMatrix() = default;
-
   /// Returns the number of fault classes, i.e. the number of rows.
   std::size_t faultCount() const { return faults_.size(); }
 
