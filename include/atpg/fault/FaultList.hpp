@@ -3,6 +3,7 @@
 #include "atpg/fault/Fault.hpp"
 #include "atpg/ir/Graph.hpp"
 
+#include <cstddef>
 #include <utility>
 #include <vector>
 
@@ -16,6 +17,17 @@ public:
 
   /// Returns the number of collapsed fault classes.
   std::size_t size() const { return classes_.size(); }
+
+  /// Returns each class's representative fault, in this list's order - the
+  /// flat form simulation and test generation both work over.
+  std::vector<Fault> representatives() const {
+    std::vector<Fault> faults;
+    faults.reserve(classes_.size());
+    for (const FaultClass& faultClass : classes_) {
+      faults.push_back(faultClass.representative);
+    }
+    return faults;
+  }
 
   std::vector<FaultClass>::const_iterator begin() const { return classes_.begin(); }
   std::vector<FaultClass>::const_iterator end() const { return classes_.end(); }

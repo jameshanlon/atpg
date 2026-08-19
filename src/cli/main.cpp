@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <fstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -245,13 +246,17 @@ int main(int argc, char** argv) {
     writeDot(graph, ofs);
   }
 
+  // Every downstream stage wants the same collapsed list, so it is built once
+  // rather than re-derived per option.
+  const atpg::fault::FaultList faultList = atpg::fault::generateFaultList(graph);
+
   if (!dumpFaultsPath.empty()) {
     std::ofstream ofs(dumpFaultsPath);
     if (!ofs) {
       fmt::print(stderr, "error: could not open {} for writing\n", dumpFaultsPath);
       return 1;
     }
-    writeFaultList(graph, atpg::fault::generateFaultList(graph), ofs);
+    writeFaultList(graph, faultList, ofs);
   }
 
   if (dropEnabled && generateTestsPath.empty()) {
@@ -268,7 +273,6 @@ int main(int argc, char** argv) {
     }
     atpg::gen::Options options;
     options.timeLimitSeconds = timeLimitSeconds;
-    const atpg::fault::FaultList faultList = atpg::fault::generateFaultList(graph);
 
     if (dropEnabled) {
       const atpg::Result<atpg::gen::TestPlan> planResult =
@@ -311,7 +315,7 @@ int main(int argc, char** argv) {
       return 1;
     }
     const atpg::Result<atpg::fsim::SimResult> results =
-        atpg::fsim::simulateFaults(graph, atpg::fault::generateFaultList(graph), patterns.value());
+        atpg::fsim::simulateFaults(graph, faultList, patterns.value());
     if (!results) {
       fmt::print(stderr, "error: {}\n", results.error());
       return 1;
@@ -326,17 +330,16 @@ int main(int argc, char** argv) {
       return 1;
     }
 
-    std::vector<std::vector<bool>> patterns = generatedPatterns;
+    std::vector<std::vector<bool>> patterns = std::move(generatedPatterns);
     if (generateTestsPath.empty()) {
-      const atpg::Result<std::vector<std::vector<bool>>> stimulus = readStimulus(stimulusPath);
+      atpg::Result<std::vector<std::vector<bool>>> stimulus = readStimulus(stimulusPath);
       if (!stimulus) {
         fmt::print(stderr, "error: {}\n", stimulus.error());
         return 1;
       }
-      patterns = stimulus.value();
+      patterns = std::move(stimulus.value());
     }
 
-    const atpg::fault::FaultList faultList = atpg::fault::generateFaultList(graph);
     const atpg::Result<atpg::compact::CompactResult> compacted =
         atpg::compact::compact(graph, faultList, patterns);
     if (!compacted) {
@@ -351,15 +354,9 @@ int main(int argc, char** argv) {
     }
     writePatterns(compacted.value().patterns, ofs);
 
-    const atpg::Result<atpg::fsim::SimResult> coverage =
-        atpg::fsim::simulateFaults(graph, faultList, compacted.value().patterns);
-    if (!coverage) {
-      fmt::print(stderr, "error: {}\n", coverage.error());
-      return 1;
-    }
     fmt::print("patterns: {} -> {} (coverage {}/{} preserved)\n", patterns.size(),
-               compacted.value().patterns.size(), coverage.value().detectedCount(),
-               coverage.value().size());
+               compacted.value().patterns.size(), compacted.value().detectedFaults,
+               compacted.value().faultCount);
   }
 
   if (!stimulusPath.empty()) {

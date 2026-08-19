@@ -35,27 +35,17 @@ Result<CompactResult> compact(const ir::Graph& graph, const fault::FaultList& fa
   const std::size_t faultCount = matrix.faultCount();
   const std::vector<std::vector<std::size_t>> detectedBy = detectionsByPattern(matrix);
 
-  // The target set: the faults some input pattern detects. Faults nothing
-  // detects are outside compaction's remit, which is what makes coverage
-  // preservation exact rather than approximate.
-  std::vector<bool> inTarget(faultCount, false);
-  std::size_t targetCount = 0;
-  for (const std::vector<std::size_t>& detections : detectedBy) {
-    for (const std::size_t f : detections) {
-      if (!inTarget[f]) {
-        inTarget[f] = true;
-        ++targetCount;
-      }
-    }
-  }
-
   // -- greedy cover ---------------------------------------------------------
+  // Runs until no pattern adds anything, which covers exactly the faults some
+  // input pattern detects. Faults nothing detects are outside compaction's
+  // remit, and leaving them out is what makes coverage preservation exact
+  // rather than approximate.
   std::vector<bool> covered(faultCount, false);
   std::vector<bool> selected(patternCount, false);
   std::vector<std::size_t> order;
   std::size_t coveredCount = 0;
 
-  while (coveredCount < targetCount) {
+  while (true) {
     std::size_t best = 0;
     std::size_t bestGain = 0;
     // Scanning ascending with a strict `>` keeps the lowest index on a tie,
@@ -76,7 +66,7 @@ Result<CompactResult> compact(const ir::Graph& graph, const fault::FaultList& fa
       }
     }
     if (bestGain == 0) {
-      return Error("compact: no remaining pattern covers an uncovered fault");
+      break;
     }
 
     selected[best] = true;
@@ -137,10 +127,12 @@ Result<CompactResult> compact(const ir::Graph& graph, const fault::FaultList& fa
       }
     }
   }
-  if (finalCount != targetCount) {
+  if (finalCount != coveredCount) {
     return Error("compact: the compacted set does not preserve the input set's coverage");
   }
 
+  result.detectedFaults = coveredCount;
+  result.faultCount = faultCount;
   return result;
 }
 

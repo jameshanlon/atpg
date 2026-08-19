@@ -81,6 +81,20 @@ inline ir::Graph randomCircuit(std::mt19937& rng) {
   return graph;
 }
 
+/// A random stimulus set of `patternCount` vectors, one bit per primary
+/// input of `graph`.
+inline std::vector<std::vector<bool>> randomPatterns(std::mt19937& rng, const ir::Graph& graph,
+                                                     std::size_t patternCount) {
+  const std::size_t piCount = graph.primaryInputs().size();
+  std::vector<std::vector<bool>> patterns(patternCount, std::vector<bool>(piCount, false));
+  for (auto& pattern : patterns) {
+    for (std::size_t b = 0; b < piCount; ++b) {
+      pattern[b] = (rng() & 1) != 0;
+    }
+  }
+  return patterns;
+}
+
 /// A stuck-at fault to force during simulation, or `active == false` for the
 /// good-circuit baseline.
 struct InjectedFault {

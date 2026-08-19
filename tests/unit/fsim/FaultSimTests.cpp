@@ -524,7 +524,10 @@ TEST_CASE("only a fault class's representative is simulated, never its equivalen
   CHECK(result.value().begin()->detected == false);
 }
 
-TEST_CASE("detectAll records every detecting pattern, not just the first", "[FaultSim]") {
+namespace {
+
+/// A 2-input OR driving one primary output, with the OR at gate id 2.
+Graph orGraph() {
   Graph graph;
   const GateId a = graph.addGate(GateType::Pi, "a");
   const GateId b = graph.addGate(GateType::Pi, "b");
@@ -534,6 +537,26 @@ TEST_CASE("detectAll records every detecting pattern, not just the first", "[Fau
   graph.addEdge(b, g);
   graph.addEdge(g, y);
   REQUIRE(graph.levelize().ok());
+  return graph;
+}
+
+/// An inverter driving one primary output, with the inverter at gate id 1.
+Graph notGraph() {
+  Graph graph;
+  const GateId a = graph.addGate(GateType::Pi, "a");
+  const GateId n = graph.addGate(GateType::Not, "n");
+  const GateId y = graph.addGate(GateType::Po, "y");
+  graph.addEdge(a, n);
+  graph.addEdge(n, y);
+  REQUIRE(graph.levelize().ok());
+  return graph;
+}
+
+} // namespace
+
+TEST_CASE("detectAll records every detecting pattern, not just the first", "[FaultSim]") {
+  const Graph graph = orGraph();
+  const GateId g = 2;
 
   FaultList faults;
   faults.add(FaultClass{Fault{PinRef{g, PinKind::Output, 0}, StuckValue::SA0}, {}});
@@ -558,15 +581,8 @@ TEST_CASE("detectAll records every detecting pattern, not just the first", "[Fau
 }
 
 TEST_CASE("detectAll keeps each fault's row separate", "[FaultSim]") {
-  Graph graph;
-  const GateId a = graph.addGate(GateType::Pi, "a");
-  const GateId b = graph.addGate(GateType::Pi, "b");
-  const GateId g = graph.addGate(GateType::Or, "g");
-  const GateId y = graph.addGate(GateType::Po, "y");
-  graph.addEdge(a, g);
-  graph.addEdge(b, g);
-  graph.addEdge(g, y);
-  REQUIRE(graph.levelize().ok());
+  const Graph graph = orGraph();
+  const GateId g = 2;
 
   FaultList faults;
   faults.add(FaultClass{Fault{PinRef{g, PinKind::Output, 0}, StuckValue::SA0}, {}});
@@ -589,13 +605,8 @@ TEST_CASE("detectAll keeps each fault's row separate", "[FaultSim]") {
 }
 
 TEST_CASE("detectAll rejects a stimulus whose width does not match the inputs", "[FaultSim]") {
-  Graph graph;
-  const GateId a = graph.addGate(GateType::Pi, "a");
-  const GateId n = graph.addGate(GateType::Not, "n");
-  const GateId y = graph.addGate(GateType::Po, "y");
-  graph.addEdge(a, n);
-  graph.addEdge(n, y);
-  REQUIRE(graph.levelize().ok());
+  const Graph graph = notGraph();
+  const GateId n = 1;
 
   FaultList faults;
   faults.add(FaultClass{Fault{PinRef{n, PinKind::Output, 0}, StuckValue::SA0}, {}});
@@ -605,13 +616,8 @@ TEST_CASE("detectAll rejects a stimulus whose width does not match the inputs", 
 }
 
 TEST_CASE("detectAll over an empty pattern set yields a matrix with no columns", "[FaultSim]") {
-  Graph graph;
-  const GateId a = graph.addGate(GateType::Pi, "a");
-  const GateId n = graph.addGate(GateType::Not, "n");
-  const GateId y = graph.addGate(GateType::Po, "y");
-  graph.addEdge(a, n);
-  graph.addEdge(n, y);
-  REQUIRE(graph.levelize().ok());
+  const Graph graph = notGraph();
+  const GateId n = 1;
 
   FaultList faults;
   faults.add(FaultClass{Fault{PinRef{n, PinKind::Output, 0}, StuckValue::SA0}, {}});

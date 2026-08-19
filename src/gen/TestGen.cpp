@@ -291,10 +291,7 @@ Result<TestPlan> generateTestsWithDropping(const ir::Graph& graph, const fault::
                              options.timeLimitSeconds));
   }
 
-  std::vector<fault::Fault> representatives;
-  for (const auto& faultClass : faults) {
-    representatives.push_back(faultClass.representative);
-  }
+  const std::vector<fault::Fault> representatives = faults.representatives();
 
   std::vector<FaultResolution> resolutions(representatives.size());
   std::vector<char> resolved(representatives.size(), 0);

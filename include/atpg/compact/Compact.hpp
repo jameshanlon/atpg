@@ -15,6 +15,11 @@ struct CompactResult {
   std::vector<std::vector<bool>> patterns;
   /// Index into the input pattern set for each kept pattern, ascending.
   std::vector<std::size_t> keptIndices;
+  /// How many fault classes the kept patterns detect - by construction the
+  /// same number the input set detected.
+  std::size_t detectedFaults = 0;
+  /// How many fault classes were considered, i.e. `faults.size()`.
+  std::size_t faultCount = 0;
 };
 
 /// Selects a subset of `patterns` detecting exactly the same fault classes

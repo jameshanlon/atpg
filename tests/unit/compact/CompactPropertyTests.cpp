@@ -128,14 +128,8 @@ TEST_CASE("compaction preserves coverage and leaves no removable pattern", "[Com
     Graph graph = randomCircuit(rng);
     REQUIRE(graph.levelize().ok());
 
-    const std::size_t piCount = graph.primaryInputs().size();
     const std::size_t patternCount = patternCountDist(rng);
-    std::vector<std::vector<bool>> patterns(patternCount, std::vector<bool>(piCount, false));
-    for (auto& pattern : patterns) {
-      for (std::size_t b = 0; b < piCount; ++b) {
-        pattern[b] = (rng() & 1) != 0;
-      }
-    }
+    const std::vector<std::vector<bool>> patterns = randomPatterns(rng, graph, patternCount);
 
     const CheckOutcome outcome = checkCompaction(graph, patterns);
     if (!outcome.violations.empty()) {

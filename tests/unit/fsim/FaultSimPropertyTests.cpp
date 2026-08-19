@@ -113,14 +113,8 @@ TEST_CASE("simulateFaults agrees with scalar simulation on random circuits",
     Graph graph = randomCircuit(rng);
     REQUIRE(graph.levelize().ok());
 
-    const std::size_t piCount = graph.primaryInputs().size();
     const std::size_t patternCount = patternCountDist(rng);
-    std::vector<std::vector<bool>> patterns(patternCount, std::vector<bool>(piCount, false));
-    for (auto& pattern : patterns) {
-      for (std::size_t b = 0; b < piCount; ++b) {
-        pattern[b] = (rng() & 1) != 0;
-      }
-    }
+    const std::vector<std::vector<bool>> patterns = randomPatterns(rng, graph, patternCount);
 
     // Both fault-list shapes the API accepts: the collapsed list a caller
     // normally passes, and every atomic fault as its own class. The latter
@@ -166,14 +160,8 @@ TEST_CASE("detectAll agrees with scalar simulation and with simulateFaults",
     Graph graph = randomCircuit(rng);
     REQUIRE(graph.levelize().ok());
 
-    const std::size_t piCount = graph.primaryInputs().size();
     const std::size_t patternCount = patternCountDist(rng);
-    std::vector<std::vector<bool>> patterns(patternCount, std::vector<bool>(piCount, false));
-    for (auto& pattern : patterns) {
-      for (std::size_t b = 0; b < piCount; ++b) {
-        pattern[b] = (rng() & 1) != 0;
-      }
-    }
+    const std::vector<std::vector<bool>> patterns = randomPatterns(rng, graph, patternCount);
 
     const FaultList faults = allAtomsAsClasses(graph);
     const std::vector<int> piIndex = primaryInputIndex(graph);

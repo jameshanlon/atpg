@@ -65,21 +65,12 @@ private:
 class DetectionMatrix {
 public:
   DetectionMatrix() = default;
-  DetectionMatrix(std::vector<fault::Fault> faults, std::size_t patternCount)
-      : faults_(std::move(faults)), patternCount_(patternCount),
-        bits_(faults_.size() * patternCount, false) {}
 
   /// Returns the number of fault classes, i.e. the number of rows.
   std::size_t faultCount() const { return faults_.size(); }
 
   /// Returns the number of patterns, i.e. the number of columns.
   std::size_t patternCount() const { return patternCount_; }
-
-  /// Records that `pattern` detects fault class `fault`. Both indices must
-  /// be in range.
-  void setDetected(std::size_t fault, std::size_t pattern) {
-    bits_[fault * patternCount_ + pattern] = true;
-  }
 
   /// Returns whether `pattern` detects fault class `fault`. Both indices
   /// must be in range.
@@ -92,6 +83,19 @@ public:
   const fault::Fault& faultAt(std::size_t fault) const { return faults_[fault]; }
 
 private:
+  // Only detectAll builds a matrix: to every other caller it is an immutable
+  // snapshot, so construction and mutation stay out of the public interface.
+  friend Result<DetectionMatrix> detectAll(const ir::Graph& graph, const fault::FaultList& faults,
+                                           const std::vector<std::vector<bool>>& patterns);
+
+  DetectionMatrix(std::vector<fault::Fault> faults, std::size_t patternCount)
+      : faults_(std::move(faults)), patternCount_(patternCount),
+        bits_(faults_.size() * patternCount, false) {}
+
+  void setDetected(std::size_t fault, std::size_t pattern) {
+    bits_[fault * patternCount_ + pattern] = true;
+  }
+
   std::vector<fault::Fault> faults_;
   std::size_t patternCount_ = 0;
   /// Row-major: faults_.size() rows of patternCount_ bits.

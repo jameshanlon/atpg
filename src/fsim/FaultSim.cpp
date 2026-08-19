@@ -216,23 +216,13 @@ void simulatePackets(const ir::Graph& graph, const std::vector<fault::Fault>& ta
   }
 }
 
-/// Each fault class's representative, in the fault list's order.
-std::vector<fault::Fault> representatives(const fault::FaultList& faults) {
-  std::vector<fault::Fault> targets;
-  targets.reserve(faults.size());
-  for (const auto& faultClass : faults) {
-    targets.push_back(faultClass.representative);
-  }
-  return targets;
-}
-
 } // namespace
 
 Result<SimResult> simulateFaults(const ir::Graph& graph, const fault::FaultList& faults,
                                  const std::vector<std::vector<bool>>& patterns) {
   ATPG_RETURN_IF_ERROR(checkPatternWidths(graph, patterns, "simulateFaults"));
 
-  const std::vector<fault::Fault> targets = representatives(faults);
+  const std::vector<fault::Fault> targets = faults.representatives();
 
   std::vector<FaultStatus> statuses;
   statuses.reserve(targets.size());
@@ -264,7 +254,7 @@ Result<DetectionMatrix> detectAll(const ir::Graph& graph, const fault::FaultList
                                   const std::vector<std::vector<bool>>& patterns) {
   ATPG_RETURN_IF_ERROR(checkPatternWidths(graph, patterns, "detectAll"));
 
-  const std::vector<fault::Fault> targets = representatives(faults);
+  const std::vector<fault::Fault> targets = faults.representatives();
   DetectionMatrix matrix(targets, patterns.size());
 
   simulatePackets(
