@@ -12,8 +12,10 @@ fault-simulates a pattern set to report coverage, and `atpg::gen`
 generates (or proves redundant) a test pattern per fault class using a
 SAT-based miter construction on OR-Tools CP-SAT - either solving every
 fault independently, or running a generate-and-drop loop that fault-
-simulates each pattern to skip the faults it already covers. See
-`README.md` for build/usage and architecture details.
+simulates each pattern to skip the faults it already covers. Finally,
+`atpg::compact` shrinks a finished pattern set to an irredundant subset
+with identical coverage. See `README.md` for build/usage and architecture
+details.
 
 ## Error handling
 
@@ -60,8 +62,8 @@ simulates each pattern to skip the faults it already covers. See
   the pkg-config gotcha).
 - One static library, `atpg-core`, with one namespace, `atpg`, split into
   sub-namespaces by directory/responsibility (`atpg::ir`, `atpg::sim`,
-  `atpg::frontend`, `atpg::fault`, `atpg::gen`, `atpg::fsim`) rather than
-  separate CMake targets.
+  `atpg::frontend`, `atpg::fault`, `atpg::gen`, `atpg::fsim`,
+  `atpg::compact`) rather than separate CMake targets.
 
 ## Testing
 

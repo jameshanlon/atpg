@@ -31,8 +31,14 @@ SystemVerilog frontend.
   fault classes it detects, which pattern detected each one first, and the
   overall coverage. Bit-parallel: 64 patterns are evaluated per machine
   word, and each fault re-simulates only its own transitive fanout cone.
+- **Pattern compaction** (`atpg::compact`): shrinks a pattern set to a
+  subset detecting exactly the same fault classes, by greedy set covering
+  over a full fault-by-pattern detection matrix followed by a pass removing
+  any pattern the rest already cover. The result is irredundant - no single
+  pattern can be dropped without losing a fault - though not guaranteed
+  minimum.
 
-Not yet implemented: pattern compaction and STIL output.
+Not yet implemented: STIL output.
 
 ## Building
 
@@ -64,7 +70,7 @@ ctest --test-dir build
 ## Usage
 
 ```sh
-atpg <file.sv> --top <module> [--dump-graph out.dot] [--dump-faults out.txt] [--generate-tests out.txt] [--time-limit seconds] [--stimulus vectors.txt] [--fault-sim out.txt] [--drop]
+atpg <file.sv> --top <module> [--dump-graph out.dot] [--dump-faults out.txt] [--generate-tests out.txt] [--time-limit seconds] [--stimulus vectors.txt] [--fault-sim out.txt] [--drop] [--compact out.txt]
 ```
 
 - `--dump-graph <path>` writes the flattened gate graph as Graphviz dot.
@@ -89,6 +95,12 @@ atpg <file.sv> --top <module> [--dump-graph out.dot] [--dump-faults out.txt] [--
   a coverage report, one line per fault class plus a summary, e.g.
   `n1/out/SA0: detected by pattern 0` and `coverage: 12/22 (54.5%)`.
   Requires `--stimulus` to supply the patterns.
+- `--compact <path>` compacts the pattern set the run produced - the
+  `--generate-tests` set if present, otherwise the `--stimulus` set - and
+  writes it one pattern per line in the format `--stimulus` reads, so the
+  result can be fed straight back in for a coverage check. A
+  `patterns: 22 -> 5 (coverage 22/22 preserved)` summary goes to stdout.
+  Requires `--generate-tests` or `--stimulus`.
 
 Example, using the bundled ISCAS c17 benchmark fixture:
 
@@ -108,6 +120,7 @@ src/            implementation, mirrors include/atpg/
   fault/        fault-list generation and collapsing
   gen/          SAT-based test generation, with and without fault dropping
   fsim/         bit-parallel fault simulation
+  compact/      pattern-set compaction
 tests/
   unit/         Catch2 tests, mirrors src/
   data/         hand-verifiable .sv fixtures (half adder, full adder, c17)
@@ -115,8 +128,8 @@ tests/
 
 Everything lives in one `atpg-core` static library and the `atpg`
 namespace, split into sub-namespaces by module (`atpg::ir`, `atpg::sim`,
-`atpg::frontend`, `atpg::fault`, `atpg::gen`, `atpg::fsim`) rather than
-separate CMake targets.
+`atpg::frontend`, `atpg::fault`, `atpg::gen`, `atpg::fsim`,
+`atpg::compact`) rather than separate CMake targets.
 
 Error handling is exception-free throughout: fallible functions return
 `atpg::Result<T>` or `atpg::Status` (see `include/atpg/Result.hpp`). See

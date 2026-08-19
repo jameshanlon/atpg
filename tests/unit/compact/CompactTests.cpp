@@ -1,11 +1,14 @@
 #include "atpg/compact/Compact.hpp"
 #include "atpg/fault/Fault.hpp"
 #include "atpg/fault/FaultList.hpp"
+#include "atpg/fsim/FaultSim.hpp"
+#include "atpg/gen/TestGen.hpp"
 #include "atpg/ir/Graph.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <cstddef>
+#include <string>
 #include <vector>
 
 #include "../Test.hpp"
@@ -153,4 +156,38 @@ TEST_CASE("compact rejects a pattern whose width does not match the inputs", "[C
 
   const atpg::Result<CompactResult> result = compact(graph, faults, {{true}});
   CHECK_FALSE(result.ok());
+}
+
+TEST_CASE("compacting c17's generated patterns preserves full coverage", "[Compact]") {
+  auto graph = buildTestGraphFromFile(std::string(ATPG_TEST_DATA_DIR) + "/c17.sv", "c17");
+  REQUIRE(graph.levelize().ok());
+
+  const FaultList faults = generateFaultList(graph);
+  const atpg::Result<atpg::gen::TestSet> tests = atpg::gen::generateTests(graph, faults);
+  REQUIRE(tests.ok());
+
+  std::vector<std::vector<bool>> patterns;
+  for (const atpg::gen::TestResult& test : tests.value()) {
+    REQUIRE(test.outcome == atpg::gen::TestOutcome::Testable);
+    patterns.push_back(test.pattern);
+  }
+  REQUIRE(patterns.size() == faults.size());
+
+  const atpg::Result<CompactResult> compacted = compact(graph, faults, patterns);
+  REQUIRE(compacted.ok());
+
+  // Closed loop over three independently built modules: fault-simulate both
+  // sets and confirm the coverage figure is untouched.
+  const atpg::Result<atpg::fsim::SimResult> before =
+      atpg::fsim::simulateFaults(graph, faults, patterns);
+  const atpg::Result<atpg::fsim::SimResult> after =
+      atpg::fsim::simulateFaults(graph, faults, compacted.value().patterns);
+  REQUIRE(before.ok());
+  REQUIRE(after.ok());
+  CHECK(after.value().detectedCount() == before.value().detectedCount());
+  CHECK(after.value().detectedCount() == faults.size());
+
+  // c17 has heavy reconvergent fanout, so one pattern per fault is far more
+  // than it needs.
+  CHECK(compacted.value().patterns.size() * 2 < patterns.size());
 }

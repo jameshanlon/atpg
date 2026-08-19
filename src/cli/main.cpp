@@ -1,4 +1,5 @@
 #include "atpg/Result.hpp"
+#include "atpg/compact/Compact.hpp"
 #include "atpg/fault/FaultList.hpp"
 #include "atpg/frontend/Frontend.hpp"
 #include "atpg/fsim/FaultSim.hpp"
@@ -36,6 +37,15 @@ void writeDot(const atpg::ir::Graph& graph, std::ostream& os) {
   fmt::print(os, "}}\n");
 }
 
+std::string patternBits(const std::vector<bool>& pattern) {
+  std::string bits;
+  bits.reserve(pattern.size());
+  for (const bool bit : pattern) {
+    bits.push_back(bit ? '1' : '0');
+  }
+  return bits;
+}
+
 std::string describeFault(const atpg::ir::Graph& graph, const atpg::fault::Fault& fault) {
   const atpg::ir::Gate& gate = graph.gate(fault.pin.gate);
   const std::string gateName = gate.name.empty() ? fmt::format("g{}", gate.id) : gate.name;
@@ -61,15 +71,9 @@ void writeTests(const atpg::ir::Graph& graph, const atpg::gen::TestSet& tests, s
   for (const auto& result : tests) {
     fmt::print(os, "{}: ", describeFault(graph, result.fault));
     switch (result.outcome) {
-      case atpg::gen::TestOutcome::Testable: {
-        std::string bits;
-        bits.reserve(result.pattern.size());
-        for (const bool bit : result.pattern) {
-          bits.push_back(bit ? '1' : '0');
-        }
-        fmt::print(os, "testable {}\n", bits);
+      case atpg::gen::TestOutcome::Testable:
+        fmt::print(os, "testable {}\n", patternBits(result.pattern));
         break;
-      }
       case atpg::gen::TestOutcome::Redundant:
         fmt::print(os, "redundant\n");
         break;
@@ -85,16 +89,9 @@ void writePlan(const atpg::ir::Graph& graph, const atpg::gen::TestPlan& plan, st
   for (const atpg::gen::FaultResolution& resolution : plan.resolutions()) {
     fmt::print(os, "{}: ", describeFault(graph, resolution.fault));
     switch (resolution.outcome) {
-      case atpg::gen::TestOutcome::Testable: {
-        const std::vector<bool>& pattern = plan.patterns()[resolution.patternIndex];
-        std::string bits;
-        bits.reserve(pattern.size());
-        for (const bool bit : pattern) {
-          bits.push_back(bit ? '1' : '0');
-        }
-        fmt::print(os, "testable {}\n", bits);
+      case atpg::gen::TestOutcome::Testable:
+        fmt::print(os, "testable {}\n", patternBits(plan.patterns()[resolution.patternIndex]));
         break;
-      }
       case atpg::gen::TestOutcome::Redundant:
         fmt::print(os, "redundant\n");
         ++unsolvable;
@@ -146,14 +143,15 @@ atpg::Status runStimulus(const atpg::ir::Graph& graph, const std::string& path) 
   for (const std::vector<bool>& piValues : patterns) {
     ATPG_ASSIGN_OR_RETURN(const std::vector<bool> outputs, atpg::sim::simulate(graph, piValues));
 
-    std::string bits;
-    bits.reserve(outputs.size());
-    for (const bool bit : outputs) {
-      bits.push_back(bit ? '1' : '0');
-    }
-    fmt::print("{}\n", bits);
+    fmt::print("{}\n", patternBits(outputs));
   }
   return {};
+}
+
+void writePatterns(const std::vector<std::vector<bool>>& patterns, std::ostream& os) {
+  for (const std::vector<bool>& pattern : patterns) {
+    fmt::print(os, "{}\n", patternBits(pattern));
+  }
 }
 
 void writeCoverage(const atpg::ir::Graph& graph, const atpg::fsim::SimResult& results,
@@ -183,6 +181,7 @@ int main(int argc, char** argv) {
   std::string dumpFaultsPath;
   std::string stimulusPath;
   std::string faultSimPath;
+  std::string compactPath;
   bool dropEnabled = false;
   std::string generateTestsPath;
   double timeLimitSeconds = atpg::gen::Options{}.timeLimitSeconds;
@@ -202,6 +201,9 @@ int main(int argc, char** argv) {
                "pattern to skip solver calls for faults it already covers");
   app.add_option("--fault-sim", faultSimPath,
                  "Fault-simulate the --stimulus patterns and write a coverage report");
+  app.add_option("--compact", compactPath,
+                 "Compact the generated (or --stimulus) pattern set to a smaller set with the "
+                 "same fault coverage, and write it one pattern per line");
   app.add_option("--stimulus", stimulusPath,
                  "Read newline-separated 0/1 stimulus vectors and simulate each one");
 
@@ -257,6 +259,7 @@ int main(int argc, char** argv) {
     return 1;
   }
 
+  std::vector<std::vector<bool>> generatedPatterns;
   if (!generateTestsPath.empty()) {
     std::ofstream ofs(generateTestsPath);
     if (!ofs) {
@@ -275,6 +278,7 @@ int main(int argc, char** argv) {
         return 1;
       }
       writePlan(graph, planResult.value(), ofs);
+      generatedPatterns = planResult.value().patterns();
     } else {
       const atpg::Result<atpg::gen::TestSet> testsResult =
           atpg::gen::generateTests(graph, faultList, options);
@@ -283,6 +287,11 @@ int main(int argc, char** argv) {
         return 1;
       }
       writeTests(graph, testsResult.value(), ofs);
+      for (const atpg::gen::TestResult& test : testsResult.value()) {
+        if (test.outcome == atpg::gen::TestOutcome::Testable) {
+          generatedPatterns.push_back(test.pattern);
+        }
+      }
     }
   }
 
@@ -308,6 +317,49 @@ int main(int argc, char** argv) {
       return 1;
     }
     writeCoverage(graph, results.value(), ofs);
+  }
+
+  if (!compactPath.empty()) {
+    if (generateTestsPath.empty() && stimulusPath.empty()) {
+      fmt::print(stderr, "error: --compact requires --generate-tests or --stimulus to supply the "
+                         "patterns\n");
+      return 1;
+    }
+
+    std::vector<std::vector<bool>> patterns = generatedPatterns;
+    if (generateTestsPath.empty()) {
+      const atpg::Result<std::vector<std::vector<bool>>> stimulus = readStimulus(stimulusPath);
+      if (!stimulus) {
+        fmt::print(stderr, "error: {}\n", stimulus.error());
+        return 1;
+      }
+      patterns = stimulus.value();
+    }
+
+    const atpg::fault::FaultList faultList = atpg::fault::generateFaultList(graph);
+    const atpg::Result<atpg::compact::CompactResult> compacted =
+        atpg::compact::compact(graph, faultList, patterns);
+    if (!compacted) {
+      fmt::print(stderr, "error: {}\n", compacted.error());
+      return 1;
+    }
+
+    std::ofstream ofs(compactPath);
+    if (!ofs) {
+      fmt::print(stderr, "error: could not open {} for writing\n", compactPath);
+      return 1;
+    }
+    writePatterns(compacted.value().patterns, ofs);
+
+    const atpg::Result<atpg::fsim::SimResult> coverage =
+        atpg::fsim::simulateFaults(graph, faultList, compacted.value().patterns);
+    if (!coverage) {
+      fmt::print(stderr, "error: {}\n", coverage.error());
+      return 1;
+    }
+    fmt::print("patterns: {} -> {} (coverage {}/{} preserved)\n", patterns.size(),
+               compacted.value().patterns.size(), coverage.value().detectedCount(),
+               coverage.value().size());
   }
 
   if (!stimulusPath.empty()) {
