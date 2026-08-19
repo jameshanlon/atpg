@@ -138,7 +138,7 @@ TEST_CASE("dropping agrees with exhaustive generation on random circuits", "[Tes
     if (!outcome.violations.empty()) {
       INFO("circuit #" << i << " (seed " << kSeed << "):\n" << dumpCircuit(graph));
       for (const auto& violation : outcome.violations) {
-        INFO(violation);
+        UNSCOPED_INFO(violation);
       }
       FAIL("generateTestsWithDropping disagreed with generateTests");
     }

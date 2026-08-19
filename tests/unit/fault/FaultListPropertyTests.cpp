@@ -135,7 +135,7 @@ TEST_CASE("generateFaultList collapsing preserves detection-set coverage and sou
     if (!violations.empty()) {
       INFO("circuit #" << i << " (seed " << kSeed << "):\n" << dumpCircuit(graph));
       for (const auto& violation : violations) {
-        INFO(violation);
+        UNSCOPED_INFO(violation);
       }
       FAIL("generateFaultList violated a soundness/completeness invariant");
     }

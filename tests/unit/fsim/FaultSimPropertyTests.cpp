@@ -141,7 +141,7 @@ TEST_CASE("simulateFaults agrees with scalar simulation on random circuits",
                          << corpus.what << "):\n"
                          << dumpCircuit(graph));
         for (const auto& violation : violations) {
-          INFO(violation);
+          UNSCOPED_INFO(violation);
         }
         FAIL("simulateFaults disagreed with scalar simulation");
       }
@@ -222,7 +222,7 @@ TEST_CASE("detectAll agrees with scalar simulation and with simulateFaults",
     if (!violations.empty()) {
       INFO("circuit #" << i << " (seed " << kSeed << "):\n" << dumpCircuit(graph));
       for (const auto& violation : violations) {
-        INFO(violation);
+        UNSCOPED_INFO(violation);
       }
       FAIL("detectAll disagreed with its ground truth");
     }
