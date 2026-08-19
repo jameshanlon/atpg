@@ -1,6 +1,7 @@
 #pragma once
 
 #include "atpg/fault/Fault.hpp"
+#include "atpg/fault/FaultList.hpp"
 #include "atpg/ir/Graph.hpp"
 
 #include <fmt/format.h>
@@ -225,6 +226,18 @@ inline std::vector<fault::Fault> enumerateAtoms(const ir::Graph& graph) {
     }
   }
   return atoms;
+}
+
+/// Every atomic fault as its own single-member class. The fault simulator
+/// accepts any FaultList, not just a collapsed one, and collapsing discards
+/// whole fault shapes (a fanout-1 gate's own output fault, for instance)
+/// that would otherwise never reach it from a test.
+inline fault::FaultList allAtomsAsClasses(const ir::Graph& graph) {
+  fault::FaultList faults;
+  for (const fault::Fault& atom : enumerateAtoms(graph)) {
+    faults.add(fault::FaultClass{atom, {}});
+  }
+  return faults;
 }
 
 /// Renders a circuit as text, for failure diagnostics.

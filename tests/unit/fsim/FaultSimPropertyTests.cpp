@@ -36,16 +36,19 @@ std::size_t oracleFirstDetecting(const Graph& graph, const std::vector<int>& piI
   return patterns.size();
 }
 
-/// Every atomic fault as its own single-member class. `simulateFaults`
-/// accepts any FaultList, not just a collapsed one, and collapsing discards
-/// whole fault shapes (a fanout-1 gate's own output fault, for instance) that
-/// would otherwise never reach the simulator from a test.
-FaultList allAtomsAsClasses(const Graph& graph) {
-  FaultList faults;
-  for (const Fault& atom : enumerateAtoms(graph)) {
-    faults.add(FaultClass{atom, {}});
+// Scalar ground truth for a whole matrix row: which patterns expose `fault`.
+// Like oracleFirstDetecting it uses this file's own independent simulator,
+// never atpg::sim, and unlike it never stops early.
+std::vector<bool> oracleDetectionRow(const Graph& graph, const std::vector<int>& piIndex,
+                                     const std::vector<std::vector<bool>>& patterns,
+                                     const Fault& fault) {
+  std::vector<bool> row(patterns.size(), false);
+  for (std::size_t p = 0; p < patterns.size(); ++p) {
+    const std::vector<bool> good = simulate(graph, piIndex, patterns[p], InjectedFault{});
+    const std::vector<bool> faulty = simulate(graph, piIndex, patterns[p], injectedFrom(fault));
+    row[p] = good != faulty;
   }
-  return faults;
+  return row;
 }
 
 std::vector<std::string> checkAgainstGroundTruth(const Graph& graph, const FaultList& faults,
@@ -142,6 +145,86 @@ TEST_CASE("simulateFaults agrees with scalar simulation on random circuits",
         }
         FAIL("simulateFaults disagreed with scalar simulation");
       }
+    }
+  }
+}
+
+TEST_CASE("detectAll agrees with scalar simulation and with simulateFaults",
+          "[FaultSim][property]") {
+  // Two checks per circuit: every matrix cell against the independent
+  // oracle, and the matrix's derived summary against simulateFaults, the
+  // already-verified entry point it now shares an engine with. Recording
+  // every cell costs more than the first-detection sweep, so this runs
+  // fewer and smaller cases than the simulateFaults property test.
+  constexpr int kIterations = 60;
+  constexpr unsigned kSeed = 20260819;
+
+  std::mt19937 rng(kSeed);
+  std::uniform_int_distribution<std::size_t> patternCountDist(1, 80);
+
+  for (int i = 0; i < kIterations; ++i) {
+    Graph graph = randomCircuit(rng);
+    REQUIRE(graph.levelize().ok());
+
+    const std::size_t piCount = graph.primaryInputs().size();
+    const std::size_t patternCount = patternCountDist(rng);
+    std::vector<std::vector<bool>> patterns(patternCount, std::vector<bool>(piCount, false));
+    for (auto& pattern : patterns) {
+      for (std::size_t b = 0; b < piCount; ++b) {
+        pattern[b] = (rng() & 1) != 0;
+      }
+    }
+
+    const FaultList faults = allAtomsAsClasses(graph);
+    const std::vector<int> piIndex = primaryInputIndex(graph);
+
+    const atpg::Result<DetectionMatrix> matrixResult = detectAll(graph, faults, patterns);
+    REQUIRE(matrixResult.ok());
+    const DetectionMatrix& matrix = matrixResult.value();
+
+    const atpg::Result<SimResult> simResult = simulateFaults(graph, faults, patterns);
+    REQUIRE(simResult.ok());
+
+    REQUIRE(matrix.faultCount() == faults.size());
+    REQUIRE(matrix.patternCount() == patternCount);
+
+    std::vector<std::string> violations;
+    std::size_t f = 0;
+    for (const FaultStatus& status : simResult.value()) {
+      if (keyOf(matrix.faultAt(f)) != keyOf(status.fault)) {
+        violations.push_back("detectAll and simulateFaults disagree on a row's fault");
+        break;
+      }
+
+      const std::vector<bool> oracle = oracleDetectionRow(graph, piIndex, patterns, status.fault);
+
+      bool any = false;
+      std::size_t first = patternCount;
+      for (std::size_t p = 0; p < patternCount; ++p) {
+        if (matrix.detects(f, p) != oracle[p]) {
+          violations.push_back("a matrix cell disagrees with independent simulation");
+        }
+        if (matrix.detects(f, p) && !any) {
+          any = true;
+          first = p;
+        }
+      }
+
+      if (any != status.detected) {
+        violations.push_back("a row's emptiness disagrees with simulateFaults' detected flag");
+      }
+      if (any && first != status.firstDetectingPattern) {
+        violations.push_back("the row's first set bit is not simulateFaults' first detection");
+      }
+      ++f;
+    }
+
+    if (!violations.empty()) {
+      INFO("circuit #" << i << " (seed " << kSeed << "):\n" << dumpCircuit(graph));
+      for (const auto& violation : violations) {
+        INFO(violation);
+      }
+      FAIL("detectAll disagreed with its ground truth");
     }
   }
 }

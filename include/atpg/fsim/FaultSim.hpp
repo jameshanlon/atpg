@@ -57,6 +57,47 @@ private:
   std::vector<FaultStatus> statuses_;
 };
 
+/// Which patterns detect which fault classes: one row per fault class, in
+/// the simulated FaultList's order, one bit per pattern.
+///
+/// The whole matrix, unlike SimResult, is what a caller needs in order to
+/// choose between patterns - see atpg::compact.
+class DetectionMatrix {
+public:
+  DetectionMatrix() = default;
+  DetectionMatrix(std::vector<fault::Fault> faults, std::size_t patternCount)
+      : faults_(std::move(faults)), patternCount_(patternCount),
+        bits_(faults_.size() * patternCount, false) {}
+
+  /// Returns the number of fault classes, i.e. the number of rows.
+  std::size_t faultCount() const { return faults_.size(); }
+
+  /// Returns the number of patterns, i.e. the number of columns.
+  std::size_t patternCount() const { return patternCount_; }
+
+  /// Records that `pattern` detects fault class `fault`. Both indices must
+  /// be in range.
+  void setDetected(std::size_t fault, std::size_t pattern) {
+    bits_[fault * patternCount_ + pattern] = true;
+  }
+
+  /// Returns whether `pattern` detects fault class `fault`. Both indices
+  /// must be in range.
+  bool detects(std::size_t fault, std::size_t pattern) const {
+    return bits_[fault * patternCount_ + pattern];
+  }
+
+  /// Returns row `fault`'s fault class representative. The index must be in
+  /// range.
+  const fault::Fault& faultAt(std::size_t fault) const { return faults_[fault]; }
+
+private:
+  std::vector<fault::Fault> faults_;
+  std::size_t patternCount_ = 0;
+  /// Row-major: faults_.size() rows of patternCount_ bits.
+  std::vector<bool> bits_;
+};
+
 /// Simulates `patterns` against every fault class's representative fault in
 /// `faults`, reporting which were detected and by which pattern first.
 ///
@@ -70,5 +111,23 @@ private:
 /// undetected. See `src/fsim/FaultSim.cpp` for the implementation.
 Result<SimResult> simulateFaults(const ir::Graph& graph, const fault::FaultList& faults,
                                  const std::vector<std::vector<bool>>& patterns);
+
+/// Simulates `patterns` against every fault class's representative fault in
+/// `faults`, recording every pattern that detects each one.
+///
+/// Same inputs and caller contract as simulateFaults: one bit per
+/// graph.primaryInputs() per pattern, `graph` already levelized, and every
+/// representative's `pin.gate` a valid gate id in `graph`.
+///
+/// Unlike simulateFaults this cannot drop a fault once detected, since the
+/// whole matrix is wanted, so it simulates every fault against every pattern
+/// and costs correspondingly more. Prefer simulateFaults when only coverage
+/// and the first detecting pattern are needed.
+///
+/// Returns an Error if any pattern's width does not match the primary-input
+/// count. An empty `patterns` is not an error: the matrix simply has no
+/// columns.
+Result<DetectionMatrix> detectAll(const ir::Graph& graph, const fault::FaultList& faults,
+                                  const std::vector<std::vector<bool>>& patterns);
 
 } // namespace atpg::fsim

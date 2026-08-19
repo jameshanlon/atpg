@@ -523,3 +523,101 @@ TEST_CASE("only a fault class's representative is simulated, never its equivalen
   CHECK(result.value().begin()->fault == Fault{PinRef{dead, PinKind::Output, 0}, StuckValue::SA1});
   CHECK(result.value().begin()->detected == false);
 }
+
+TEST_CASE("detectAll records every detecting pattern, not just the first", "[FaultSim]") {
+  Graph graph;
+  const GateId a = graph.addGate(GateType::Pi, "a");
+  const GateId b = graph.addGate(GateType::Pi, "b");
+  const GateId g = graph.addGate(GateType::Or, "g");
+  const GateId y = graph.addGate(GateType::Po, "y");
+  graph.addEdge(a, g);
+  graph.addEdge(b, g);
+  graph.addEdge(g, y);
+  REQUIRE(graph.levelize().ok());
+
+  FaultList faults;
+  faults.add(FaultClass{Fault{PinRef{g, PinKind::Output, 0}, StuckValue::SA0}, {}});
+
+  // Or output SA0 is visible whenever the good output is 1, which is every
+  // pattern but 00 - three set bits in one row, which is precisely what
+  // simulateFaults cannot report.
+  const std::vector<std::vector<bool>> patterns = {
+      {false, false}, {false, true}, {true, false}, {true, true}};
+
+  const atpg::Result<DetectionMatrix> result = detectAll(graph, faults, patterns);
+  REQUIRE(result.ok());
+
+  const DetectionMatrix& matrix = result.value();
+  REQUIRE(matrix.faultCount() == 1);
+  REQUIRE(matrix.patternCount() == 4);
+  CHECK_FALSE(matrix.detects(0, 0));
+  CHECK(matrix.detects(0, 1));
+  CHECK(matrix.detects(0, 2));
+  CHECK(matrix.detects(0, 3));
+  CHECK(matrix.faultAt(0).pin.gate == g);
+}
+
+TEST_CASE("detectAll keeps each fault's row separate", "[FaultSim]") {
+  Graph graph;
+  const GateId a = graph.addGate(GateType::Pi, "a");
+  const GateId b = graph.addGate(GateType::Pi, "b");
+  const GateId g = graph.addGate(GateType::Or, "g");
+  const GateId y = graph.addGate(GateType::Po, "y");
+  graph.addEdge(a, g);
+  graph.addEdge(b, g);
+  graph.addEdge(g, y);
+  REQUIRE(graph.levelize().ok());
+
+  FaultList faults;
+  faults.add(FaultClass{Fault{PinRef{g, PinKind::Output, 0}, StuckValue::SA0}, {}});
+  faults.add(FaultClass{Fault{PinRef{g, PinKind::Output, 0}, StuckValue::SA1}, {}});
+
+  const std::vector<std::vector<bool>> patterns = {
+      {false, false}, {false, true}, {true, false}, {true, true}};
+
+  const atpg::Result<DetectionMatrix> result = detectAll(graph, faults, patterns);
+  REQUIRE(result.ok());
+
+  // The two polarities are exact complements: SA1 shows only where the good
+  // output is 0, SA0 only where it is 1.
+  const DetectionMatrix& matrix = result.value();
+  REQUIRE(matrix.faultCount() == 2);
+  for (std::size_t p = 0; p < 4; ++p) {
+    CHECK(matrix.detects(0, p) != matrix.detects(1, p));
+  }
+  CHECK(matrix.detects(1, 0));
+}
+
+TEST_CASE("detectAll rejects a stimulus whose width does not match the inputs", "[FaultSim]") {
+  Graph graph;
+  const GateId a = graph.addGate(GateType::Pi, "a");
+  const GateId n = graph.addGate(GateType::Not, "n");
+  const GateId y = graph.addGate(GateType::Po, "y");
+  graph.addEdge(a, n);
+  graph.addEdge(n, y);
+  REQUIRE(graph.levelize().ok());
+
+  FaultList faults;
+  faults.add(FaultClass{Fault{PinRef{n, PinKind::Output, 0}, StuckValue::SA0}, {}});
+
+  const atpg::Result<DetectionMatrix> result = detectAll(graph, faults, {{true, false}});
+  CHECK_FALSE(result.ok());
+}
+
+TEST_CASE("detectAll over an empty pattern set yields a matrix with no columns", "[FaultSim]") {
+  Graph graph;
+  const GateId a = graph.addGate(GateType::Pi, "a");
+  const GateId n = graph.addGate(GateType::Not, "n");
+  const GateId y = graph.addGate(GateType::Po, "y");
+  graph.addEdge(a, n);
+  graph.addEdge(n, y);
+  REQUIRE(graph.levelize().ok());
+
+  FaultList faults;
+  faults.add(FaultClass{Fault{PinRef{n, PinKind::Output, 0}, StuckValue::SA0}, {}});
+
+  const atpg::Result<DetectionMatrix> result = detectAll(graph, faults, {});
+  REQUIRE(result.ok());
+  CHECK(result.value().faultCount() == 1);
+  CHECK(result.value().patternCount() == 0);
+}

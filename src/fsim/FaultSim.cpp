@@ -1,8 +1,11 @@
 #include "atpg/fsim/FaultSim.hpp"
 
+#include <fmt/format.h>
+
 #include <algorithm>
 #include <bit>
 #include <cstdint>
+#include <string_view>
 #include <vector>
 
 namespace atpg::fsim {
@@ -88,27 +91,35 @@ std::vector<ir::GateId> fanoutCone(const ir::Graph& graph, ir::GateId site) {
   return cone;
 }
 
-} // namespace
-
-Result<SimResult> simulateFaults(const ir::Graph& graph, const fault::FaultList& faults,
-                                 const std::vector<std::vector<bool>>& patterns) {
-  const auto& pis = graph.primaryInputs();
+Status checkPatternWidths(const ir::Graph& graph, const std::vector<std::vector<bool>>& patterns,
+                          std::string_view caller) {
   for (const auto& pattern : patterns) {
-    if (pattern.size() != pis.size()) {
-      return Error("simulateFaults: stimulus width does not match primary input count");
+    if (pattern.size() != graph.primaryInputs().size()) {
+      return Error(fmt::format("{}: stimulus width does not match primary input count", caller));
     }
   }
+  return {};
+}
 
-  // Per-fault state, in the fault list's order. The fanout cone is a
-  // structural property of the graph, so it is computed once per fault here
-  // rather than once per packet.
-  std::vector<FaultStatus> statuses;
+/// The bit-parallel engine behind both entry points.
+///
+/// For each packet of up to 64 patterns, and each fault `skip` does not
+/// exclude, computes the word of primary-output differences - lane `l` set
+/// when the fault is visible under pattern `base + l` - and passes it to
+/// `record(faultIndex, base, diff)`. Padding lanes of a partial final packet
+/// are masked off first. A `record` returning true releases that fault's
+/// cone, which the dropping caller uses to bound memory.
+template <typename Skip, typename Record>
+void simulatePackets(const ir::Graph& graph, const std::vector<fault::Fault>& targets,
+                     const std::vector<std::vector<bool>>& patterns, Skip&& skip, Record&& record) {
+  const auto& pis = graph.primaryInputs();
+
+  // The fanout cone is a structural property of the graph, so it is computed
+  // once per fault here rather than once per packet.
   std::vector<std::vector<ir::GateId>> cones;
-  for (const auto& faultClass : faults) {
-    FaultStatus status;
-    status.fault = faultClass.representative;
-    statuses.push_back(std::move(status));
-    cones.push_back(fanoutCone(graph, faultClass.representative.pin.gate));
+  cones.reserve(targets.size());
+  for (const fault::Fault& target : targets) {
+    cones.push_back(fanoutCone(graph, target.pin.gate));
   }
 
   std::vector<Word> good(graph.size(), 0);
@@ -142,13 +153,13 @@ Result<SimResult> simulateFaults(const ir::Graph& graph, const fault::FaultList&
       good[id] = evaluateGate(gate, [&](std::size_t i) { return good[gate.fanin[i]]; });
     }
 
-    // -- faulty passes, one per still-undetected fault ------------------------
-    for (std::size_t f = 0; f < statuses.size(); ++f) {
-      if (statuses[f].detected) {
-        continue; // dropped: already finished in an earlier packet
+    // -- faulty passes -------------------------------------------------------
+    for (std::size_t f = 0; f < targets.size(); ++f) {
+      if (skip(f)) {
+        continue;
       }
 
-      const fault::Fault& target = statuses[f].fault;
+      const fault::Fault& target = targets[f];
       const Word stuck = target.value == fault::StuckValue::SA1 ? kAllOnes : Word{0};
       const std::vector<ir::GateId>& cone = cones[f];
 
@@ -194,9 +205,7 @@ Result<SimResult> simulateFaults(const ir::Graph& graph, const fault::FaultList&
         inCone[id] = 0;
       }
 
-      if (diff != 0) {
-        statuses[f].detected = true;
-        statuses[f].firstDetectingPattern = base + static_cast<std::size_t>(std::countr_zero(diff));
+      if (record(f, base, diff)) {
         // This fault is finished, so release its cone rather than holding
         // every cone for the whole run. On a large design most faults drop
         // in the first packet or two, so this is where the memory goes.
@@ -205,12 +214,70 @@ Result<SimResult> simulateFaults(const ir::Graph& graph, const fault::FaultList&
       }
     }
   }
+}
+
+/// Each fault class's representative, in the fault list's order.
+std::vector<fault::Fault> representatives(const fault::FaultList& faults) {
+  std::vector<fault::Fault> targets;
+  targets.reserve(faults.size());
+  for (const auto& faultClass : faults) {
+    targets.push_back(faultClass.representative);
+  }
+  return targets;
+}
+
+} // namespace
+
+Result<SimResult> simulateFaults(const ir::Graph& graph, const fault::FaultList& faults,
+                                 const std::vector<std::vector<bool>>& patterns) {
+  ATPG_RETURN_IF_ERROR(checkPatternWidths(graph, patterns, "simulateFaults"));
+
+  const std::vector<fault::Fault> targets = representatives(faults);
+
+  std::vector<FaultStatus> statuses;
+  statuses.reserve(targets.size());
+  for (const fault::Fault& target : targets) {
+    FaultStatus status;
+    status.fault = target;
+    statuses.push_back(std::move(status));
+  }
+
+  simulatePackets(
+      graph, targets, patterns, [&](std::size_t f) { return statuses[f].detected; },
+      [&](std::size_t f, std::size_t base, Word diff) {
+        if (diff == 0) {
+          return false;
+        }
+        statuses[f].detected = true;
+        statuses[f].firstDetectingPattern = base + static_cast<std::size_t>(std::countr_zero(diff));
+        return true; // dropped: release the cone and skip this fault from now on
+      });
 
   SimResult result;
   for (FaultStatus& status : statuses) {
     result.add(std::move(status));
   }
   return result;
+}
+
+Result<DetectionMatrix> detectAll(const ir::Graph& graph, const fault::FaultList& faults,
+                                  const std::vector<std::vector<bool>>& patterns) {
+  ATPG_RETURN_IF_ERROR(checkPatternWidths(graph, patterns, "detectAll"));
+
+  const std::vector<fault::Fault> targets = representatives(faults);
+  DetectionMatrix matrix(targets, patterns.size());
+
+  simulatePackets(
+      graph, targets, patterns, [](std::size_t) { return false; },
+      [&](std::size_t f, std::size_t base, Word diff) {
+        while (diff != 0) {
+          matrix.setDetected(f, base + static_cast<std::size_t>(std::countr_zero(diff)));
+          diff &= diff - 1; // clear the lowest set lane
+        }
+        return false; // never released: every fault is simulated in every packet
+      });
+
+  return matrix;
 }
 
 } // namespace atpg::fsim
