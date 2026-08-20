@@ -37,8 +37,15 @@ SystemVerilog frontend.
   any pattern the rest already cover. The result is irredundant - no single
   pattern can be dropped without losing a fault - though not guaranteed
   minimum.
+- **STIL output** (`atpg::stil`): renders a pattern set as an IEEE 1450
+  STIL program, each vector carrying both the stimulus and the expected
+  primary-output response, so the generated tests can be consumed by a
+  tester flow. Timing is fixed: inputs drive at time 0, outputs strobe at
+  mid-period.
 
-Not yet implemented: STIL output.
+The emitted STIL follows the IEEE 1450-1999 structure, but has not been
+validated against a real STIL reader - the tests check the program's
+semantics, not that a tester would load it.
 
 ## Building
 
@@ -70,7 +77,7 @@ ctest --test-dir build
 ## Usage
 
 ```sh
-atpg <file.sv> --top <module> [--dump-graph out.dot] [--dump-faults out.txt] [--generate-tests out.txt] [--time-limit seconds] [--stimulus vectors.txt] [--fault-sim out.txt] [--drop] [--compact out.txt]
+atpg <file.sv> --top <module> [--dump-graph out.dot] [--dump-faults out.txt] [--generate-tests out.txt] [--time-limit seconds] [--stimulus vectors.txt] [--fault-sim out.txt] [--drop] [--compact out.txt] [--stil out.stil]
 ```
 
 - `--dump-graph <path>` writes the flattened gate graph as Graphviz dot.
@@ -101,6 +108,11 @@ atpg <file.sv> --top <module> [--dump-graph out.dot] [--dump-faults out.txt] [--
   result can be fed straight back in for a coverage check. A
   `patterns: 22 -> 5 (coverage 22/22 preserved)` summary goes to stdout.
   Requires `--generate-tests` or `--stimulus`.
+- `--stil <path>` writes the run's pattern set as an IEEE 1450 STIL
+  program. The run's pattern set is the compacted set if `--compact` ran,
+  otherwise the generated set if `--generate-tests` ran, otherwise the
+  `--stimulus` set - so `--generate-tests --compact --stil out.stil` is one
+  pipeline. Requires one of those three options.
 
 Example, using the bundled ISCAS c17 benchmark fixture:
 
@@ -121,6 +133,7 @@ src/            implementation, mirrors include/atpg/
   gen/          SAT-based test generation, with and without fault dropping
   fsim/         bit-parallel fault simulation
   compact/      pattern-set compaction
+  stil/         IEEE 1450 STIL output
 tests/
   unit/         Catch2 tests, mirrors src/
   data/         hand-verifiable .sv fixtures (half adder, full adder, c17)
@@ -129,7 +142,7 @@ tests/
 Everything lives in one `atpg-core` static library and the `atpg`
 namespace, split into sub-namespaces by module (`atpg::ir`, `atpg::sim`,
 `atpg::frontend`, `atpg::fault`, `atpg::gen`, `atpg::fsim`,
-`atpg::compact`) rather than separate CMake targets.
+`atpg::compact`, `atpg::stil`) rather than separate CMake targets.
 
 Error handling is exception-free throughout: fallible functions return
 `atpg::Result<T>` or `atpg::Status` (see `include/atpg/Result.hpp`). See

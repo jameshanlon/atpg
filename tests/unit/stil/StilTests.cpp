@@ -1,10 +1,17 @@
+#include "atpg/compact/Compact.hpp"
+#include "atpg/fault/FaultList.hpp"
+#include "atpg/gen/TestGen.hpp"
 #include "atpg/ir/Graph.hpp"
 #include "atpg/stil/Stil.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cstddef>
 #include <string>
 #include <vector>
+
+#include "../Test.hpp"
+#include "../stil/StilReader.hpp"
 
 using namespace atpg::ir;
 using namespace atpg::stil;
@@ -113,4 +120,40 @@ TEST_CASE("writeStil rejects a design with no primary inputs", "[Stil]") {
   REQUIRE(graph.levelize().ok());
 
   CHECK_FALSE(writeStil(graph, {}, "demo").ok());
+}
+
+TEST_CASE("c17's compacted patterns render to a STIL program that reads back", "[Stil]") {
+  auto graph = buildTestGraphFromFile(std::string(ATPG_TEST_DATA_DIR) + "/c17.sv", "c17");
+  REQUIRE(graph.levelize().ok());
+
+  const atpg::fault::FaultList faults = atpg::fault::generateFaultList(graph);
+  const atpg::Result<atpg::gen::TestSet> tests = atpg::gen::generateTests(graph, faults);
+  REQUIRE(tests.ok());
+
+  std::vector<std::vector<bool>> patterns;
+  for (const atpg::gen::TestResult& test : tests.value()) {
+    REQUIRE(test.outcome == atpg::gen::TestOutcome::Testable);
+    patterns.push_back(test.pattern);
+  }
+
+  const atpg::Result<atpg::compact::CompactResult> compacted =
+      atpg::compact::compact(graph, faults, patterns);
+  REQUIRE(compacted.ok());
+
+  const atpg::Result<std::string> stil = writeStil(graph, compacted.value().patterns, "c17");
+  REQUIRE(stil.ok());
+
+  const atpg::Result<atpg::testing::StilProgram> program = atpg::testing::readStil(stil.value());
+  REQUIRE(program.ok());
+
+  // c17 has five inputs and two outputs, so a transposed or misaligned
+  // field would be visible here where an equal-width design hides it.
+  CHECK(program.value().piGroup.size() == 5);
+  CHECK(program.value().poGroup.size() == 2);
+  REQUIRE(program.value().vectors.size() == compacted.value().patterns.size());
+
+  for (std::size_t p = 0; p < program.value().vectors.size(); ++p) {
+    CHECK(program.value().vectors[p].inputs.size() == 5);
+    CHECK(program.value().vectors[p].outputs.size() == 2);
+  }
 }

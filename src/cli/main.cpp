@@ -6,6 +6,7 @@
 #include "atpg/gen/TestGen.hpp"
 #include "atpg/ir/Graph.hpp"
 #include "atpg/sim/LogicSim.hpp"
+#include "atpg/stil/Stil.hpp"
 
 #include "slang/ast/Compilation.h"
 #include "slang/syntax/SyntaxTree.h"
@@ -182,6 +183,7 @@ int main(int argc, char** argv) {
   std::string stimulusPath;
   std::string faultSimPath;
   std::string compactPath;
+  std::string stilPath;
   bool dropEnabled = false;
   std::string generateTestsPath;
   double timeLimitSeconds = atpg::gen::Options{}.timeLimitSeconds;
@@ -204,6 +206,9 @@ int main(int argc, char** argv) {
   app.add_option("--compact", compactPath,
                  "Compact the generated (or --stimulus) pattern set to a smaller set with the "
                  "same fault coverage, and write it one pattern per line");
+  app.add_option("--stil", stilPath,
+                 "Write the run's pattern set as an IEEE 1450 STIL program, with the expected "
+                 "primary-output response for each vector");
   app.add_option("--stimulus", stimulusPath,
                  "Read newline-separated 0/1 stimulus vectors and simulate each one");
 
@@ -374,7 +379,28 @@ int main(int argc, char** argv) {
                                                       : !generateTestsPath.empty()
                                                           ? generatedPatterns
                                                           : stimulusPatterns;
-  (void)runPatterns;
+
+  if (!stilPath.empty()) {
+    if (compactPath.empty() && generateTestsPath.empty() && stimulusPath.empty()) {
+      fmt::print(stderr, "error: --stil requires --generate-tests, --compact or --stimulus to "
+                         "supply the patterns\n");
+      return 1;
+    }
+
+    std::ofstream ofs(stilPath);
+    if (!ofs) {
+      fmt::print(stderr, "error: could not open {} for writing\n", stilPath);
+      return 1;
+    }
+
+    const atpg::Result<std::string> stil = atpg::stil::writeStil(graph, runPatterns, top);
+    if (!stil) {
+      fmt::print(stderr, "error: {}\n", stil.error());
+      return 1;
+    }
+    fmt::print(ofs, "{}", stil.value());
+    fmt::print("stil: {} vectors written to {}\n", runPatterns.size(), stilPath);
+  }
 
   if (!stimulusPath.empty()) {
     const atpg::Status simStatus = runStimulus(graph, stimulusPatterns);
