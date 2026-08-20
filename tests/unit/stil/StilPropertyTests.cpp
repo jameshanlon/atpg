@@ -17,6 +17,28 @@ using namespace atpg::testing;
 
 namespace {
 
+/// The names of `ids`, in order.
+std::vector<std::string> namesOf(const Graph& graph, const std::vector<GateId>& ids) {
+  std::vector<std::string> names;
+  names.reserve(ids.size());
+  for (const GateId id : ids) {
+    names.push_back(graph.gate(id).name);
+  }
+  return names;
+}
+
+/// `bits` rendered with `zero`/`one` as its two characters. Deliberately a
+/// separate implementation from atpg::stil's own - reusing the writer's
+/// helper would only confirm it agrees with itself.
+std::string toChars(const std::vector<bool>& bits, char zero, char one) {
+  std::string text;
+  text.reserve(bits.size());
+  for (const bool bit : bits) {
+    text.push_back(bit ? one : zero);
+  }
+  return text;
+}
+
 std::vector<std::string> checkProgram(const Graph& graph,
                                       const std::vector<std::vector<bool>>& patterns) {
   std::vector<std::string> violations;
@@ -32,24 +54,25 @@ std::vector<std::string> checkProgram(const Graph& graph,
     violations.push_back("the emitted program could not be scanned: " + program.error());
     return violations;
   }
+  const StilProgram& scanned = program.value();
 
   const std::vector<GateId>& pis = graph.primaryInputs();
   const std::vector<GateId>& pos = graph.primaryOutputs();
 
   // Signal declarations: inputs then outputs, names and directions in the
   // graph's port order.
-  if (program.value().signals.size() != pis.size() + pos.size()) {
+  if (scanned.signals.size() != pis.size() + pos.size()) {
     violations.push_back("the Signals block does not declare every primary input and output");
     return violations;
   }
   for (std::size_t i = 0; i < pis.size(); ++i) {
-    const StilSignal& signal = program.value().signals[i];
+    const StilSignal& signal = scanned.signals[i];
     if (signal.name != graph.gate(pis[i]).name || !signal.isInput) {
       violations.push_back("a primary input is misdeclared or out of order");
     }
   }
   for (std::size_t i = 0; i < pos.size(); ++i) {
-    const StilSignal& signal = program.value().signals[pis.size() + i];
+    const StilSignal& signal = scanned.signals[pis.size() + i];
     if (signal.name != graph.gate(pos[i]).name || signal.isInput) {
       violations.push_back("a primary output is misdeclared or out of order");
     }
@@ -58,46 +81,30 @@ std::vector<std::string> checkProgram(const Graph& graph,
   // Group membership must agree with the declarations. A writer whose
   // Signals order and SignalGroups order drift apart silently transposes
   // every vector's columns.
-  std::vector<std::string> expectedPi;
-  for (const GateId id : pis) {
-    expectedPi.push_back(graph.gate(id).name);
-  }
-  std::vector<std::string> expectedPo;
-  for (const GateId id : pos) {
-    expectedPo.push_back(graph.gate(id).name);
-  }
-  if (program.value().piGroup != expectedPi) {
+  if (scanned.piGroup != namesOf(graph, pis)) {
     violations.push_back("the PI group does not match the declared inputs, in order");
   }
-  if (program.value().poGroup != expectedPo) {
+  if (scanned.poGroup != namesOf(graph, pos)) {
     violations.push_back("the PO group does not match the declared outputs, in order");
   }
 
-  if (program.value().vectors.size() != patterns.size()) {
+  if (scanned.vectors.size() != patterns.size()) {
     violations.push_back("the Pattern block does not hold one vector per pattern");
     return violations;
   }
 
   const std::vector<int> piIndex = primaryInputIndex(graph);
   for (std::size_t p = 0; p < patterns.size(); ++p) {
-    const StilVector& vector = program.value().vectors[p];
+    const StilVector& vector = scanned.vectors[p];
 
-    std::string expectedStimulus;
-    for (const bool bit : patterns[p]) {
-      expectedStimulus.push_back(bit ? '1' : '0');
-    }
-    if (vector.inputs != expectedStimulus) {
+    if (vector.inputs != toChars(patterns[p], '0', '1')) {
       violations.push_back("a vector's stimulus is not the pattern it was given");
     }
 
     // Derived with the independent oracle, never atpg::sim - writeStil uses
     // atpg::sim internally, so a shared bug would agree with itself.
     const std::vector<bool> outputs = simulate(graph, piIndex, patterns[p], InjectedFault{});
-    std::string expectedResponse;
-    for (const bool bit : outputs) {
-      expectedResponse.push_back(bit ? 'H' : 'L');
-    }
-    if (vector.outputs != expectedResponse) {
+    if (vector.outputs != toChars(outputs, 'L', 'H')) {
       violations.push_back("a vector's expected response is not the circuit's actual response");
     }
   }

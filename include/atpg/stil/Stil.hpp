@@ -25,6 +25,14 @@ namespace atpg::stil {
 /// at time 0, outputs strobe at mid-period. Nothing is configurable, since
 /// there is no tester attached to this project to configure it for.
 ///
+/// The whole program is returned as a string rather than streamed to an
+/// ostream, unlike the CLI's own report writers, so that a failure part-way
+/// through leaves no output at all: a half-written STIL file would look
+/// plausible enough to load. It also costs one scalar simulation per
+/// pattern, where the bit-parallel engine in atpg::fsim evaluates 64 at a
+/// time - immaterial for a single terminal step over an already-compacted
+/// set, and the reason no batched good-machine entry point was added for it.
+///
 /// The emitted syntax follows the IEEE 1450-1999 structure but has not been
 /// validated against a real STIL reader - no parser is available here as a
 /// dependency. The tests verify the program's semantics thoroughly; they

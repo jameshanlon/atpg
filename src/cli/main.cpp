@@ -284,7 +284,12 @@ int main(int argc, char** argv) {
     return 1;
   }
 
+  // The run's current pattern set: each stage that produces one takes over,
+  // so every stage downstream sees the latest without restating the rule.
   std::vector<std::vector<bool>> generatedPatterns;
+  std::vector<std::vector<bool>> compactedPatterns;
+  const std::vector<std::vector<bool>>* currentPatterns = &stimulusPatterns;
+
   if (!generateTestsPath.empty()) {
     std::ofstream ofs(generateTestsPath);
     if (!ofs) {
@@ -317,9 +322,13 @@ int main(int argc, char** argv) {
         }
       }
     }
+    currentPatterns = &generatedPatterns;
   }
 
   if (!faultSimPath.empty()) {
+    // Deliberately reads the stimulus rather than the run's current pattern
+    // set: this measures the coverage of an externally supplied vector set,
+    // rather than being a stage of the generation pipeline.
     if (stimulusPath.empty()) {
       fmt::print(stderr, "error: --fault-sim requires --stimulus to supply the patterns\n");
       return 1;
@@ -338,16 +347,12 @@ int main(int argc, char** argv) {
     writeCoverage(graph, results.value(), ofs);
   }
 
-  std::vector<std::vector<bool>> compactedPatterns;
   if (!compactPath.empty()) {
     if (generateTestsPath.empty() && stimulusPath.empty()) {
       fmt::print(stderr, "error: --compact requires --generate-tests or --stimulus to supply the "
                          "patterns\n");
       return 1;
     }
-
-    const std::vector<std::vector<bool>>& patterns =
-        generateTestsPath.empty() ? stimulusPatterns : generatedPatterns;
 
     // Opened before the work, like every other output option: a bad path
     // should not cost a full solver campaign before it is reported.
@@ -358,27 +363,20 @@ int main(int argc, char** argv) {
     }
 
     atpg::Result<atpg::compact::CompactResult> compacted =
-        atpg::compact::compact(graph, faultList, patterns);
+        atpg::compact::compact(graph, faultList, *currentPatterns);
     if (!compacted) {
       fmt::print(stderr, "error: {}\n", compacted.error());
       return 1;
     }
     writePatterns(compacted.value().patterns, ofs);
 
-    fmt::print("patterns: {} -> {} (coverage {}/{} preserved)\n", patterns.size(),
+    fmt::print("patterns: {} -> {} (coverage {}/{} preserved)\n", currentPatterns->size(),
                compacted.value().patterns.size(), compacted.value().detectedFaults,
                compacted.value().faultCount);
 
     compactedPatterns = std::move(compacted.value().patterns);
+    currentPatterns = &compactedPatterns;
   }
-
-  // One rule for the whole run: the latest pattern set any stage produced.
-  // --fault-sim is deliberately not a consumer - its documented contract is
-  // to simulate the --stimulus patterns specifically.
-  const std::vector<std::vector<bool>>& runPatterns = !compactPath.empty() ? compactedPatterns
-                                                      : !generateTestsPath.empty()
-                                                          ? generatedPatterns
-                                                          : stimulusPatterns;
 
   if (!stilPath.empty()) {
     if (compactPath.empty() && generateTestsPath.empty() && stimulusPath.empty()) {
@@ -393,13 +391,13 @@ int main(int argc, char** argv) {
       return 1;
     }
 
-    const atpg::Result<std::string> stil = atpg::stil::writeStil(graph, runPatterns, top);
+    const atpg::Result<std::string> stil = atpg::stil::writeStil(graph, *currentPatterns, top);
     if (!stil) {
       fmt::print(stderr, "error: {}\n", stil.error());
       return 1;
     }
     fmt::print(ofs, "{}", stil.value());
-    fmt::print("stil: {} vectors written to {}\n", runPatterns.size(), stilPath);
+    fmt::print("stil: {} vectors written to {}\n", currentPatterns->size(), stilPath);
   }
 
   if (!stimulusPath.empty()) {

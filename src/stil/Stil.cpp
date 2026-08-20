@@ -24,6 +24,17 @@ std::string groupExpression(const ir::Graph& graph, const std::vector<ir::GateId
   return expression;
 }
 
+/// `bits` rendered with `zero`/`one` as its two characters - `0`/`1` for
+/// stimulus, `L`/`H` for an expected response.
+std::string toChars(const std::vector<bool>& bits, char zero, char one) {
+  std::string text;
+  text.reserve(bits.size());
+  for (const bool bit : bits) {
+    text.push_back(bit ? one : zero);
+  }
+  return text;
+}
+
 } // namespace
 
 Result<std::string> writeStil(const ir::Graph& graph,
@@ -59,52 +70,51 @@ Result<std::string> writeStil(const ir::Graph& graph,
   std::string out;
   auto emit = std::back_inserter(out);
 
-  fmt::format_to(emit, "STIL 1.0;\n\n");
+  out += "STIL 1.0;\n\n";
   fmt::format_to(emit, "Header {{\n  Title \"atpg-generated test patterns for {}\";\n}}\n\n",
                  designName);
 
-  fmt::format_to(emit, "Signals {{\n");
+  out += "Signals {\n";
   for (const ir::GateId id : pis) {
     fmt::format_to(emit, "  \"{}\" In;\n", graph.gate(id).name);
   }
   for (const ir::GateId id : pos) {
     fmt::format_to(emit, "  \"{}\" Out;\n", graph.gate(id).name);
   }
-  fmt::format_to(emit, "}}\n\n");
+  out += "}\n\n";
 
   fmt::format_to(emit, "SignalGroups {{\n  \"PI\" = '{}';\n  \"PO\" = '{}';\n}}\n\n",
                  groupExpression(graph, pis), groupExpression(graph, pos));
 
-  fmt::format_to(emit, "Timing \"timing\" {{\n"
-                       "  WaveformTable \"wft\" {{\n"
-                       "    Period '100ns';\n"
-                       "    Waveforms {{\n"
-                       "      \"PI\" {{ 01 {{ '0ns' D/U; }} }}\n"
-                       "      \"PO\" {{ LH {{ '50ns' L/H; }} }}\n"
-                       "    }}\n"
-                       "  }}\n"
-                       "}}\n\n");
+  out += R"(Timing "timing" {
+  WaveformTable "wft" {
+    Period '100ns';
+    Waveforms {
+      "PI" { 01 { '0ns' D/U; } }
+      "PO" { LH { '50ns' L/H; } }
+    }
+  }
+}
 
-  fmt::format_to(emit, "PatternBurst \"burst\" {{\n  PatList {{ \"patterns\" {{ }} }}\n}}\n\n");
-  fmt::format_to(emit, "PatternExec {{\n  Timing \"timing\";\n  PatternBurst \"burst\";\n}}\n\n");
+PatternBurst "burst" {
+  PatList { "patterns" { } }
+}
 
-  fmt::format_to(emit, "Pattern \"patterns\" {{\n  W \"wft\";\n");
+PatternExec {
+  Timing "timing";
+  PatternBurst "burst";
+}
+
+Pattern "patterns" {
+  W "wft";
+)";
   for (const std::vector<bool>& pattern : patterns) {
     ATPG_ASSIGN_OR_RETURN(const std::vector<bool> outputs, sim::simulate(graph, pattern));
 
-    std::string stimulus;
-    stimulus.reserve(pattern.size());
-    for (const bool bit : pattern) {
-      stimulus.push_back(bit ? '1' : '0');
-    }
-    std::string response;
-    response.reserve(outputs.size());
-    for (const bool bit : outputs) {
-      response.push_back(bit ? 'H' : 'L');
-    }
-    fmt::format_to(emit, "  V {{ \"PI\"={}; \"PO\"={}; }}\n", stimulus, response);
+    fmt::format_to(emit, "  V {{ \"PI\"={}; \"PO\"={}; }}\n", toChars(pattern, '0', '1'),
+                   toChars(outputs, 'L', 'H'));
   }
-  fmt::format_to(emit, "}}\n");
+  out += "}\n";
 
   return out;
 }
