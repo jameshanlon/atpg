@@ -379,21 +379,25 @@ int main(int argc, char** argv) {
   }
 
   if (!stilPath.empty()) {
-    if (compactPath.empty() && generateTestsPath.empty() && stimulusPath.empty()) {
-      fmt::print(stderr, "error: --stil requires --generate-tests, --compact or --stimulus to "
-                         "supply the patterns\n");
-      return 1;
-    }
-
-    std::ofstream ofs(stilPath);
-    if (!ofs) {
-      fmt::print(stderr, "error: could not open {} for writing\n", stilPath);
+    // --compact is not listed: it already requires one of these two itself.
+    if (generateTestsPath.empty() && stimulusPath.empty()) {
+      fmt::print(stderr, "error: --stil requires --generate-tests or --stimulus to supply the "
+                         "patterns\n");
       return 1;
     }
 
     const atpg::Result<std::string> stil = atpg::stil::writeStil(graph, *currentPatterns, top);
     if (!stil) {
       fmt::print(stderr, "error: {}\n", stil.error());
+      return 1;
+    }
+
+    // Opened only once the whole program exists, unlike the other output
+    // options: writing STIL is cheap, and truncating first would destroy a
+    // good file from a previous run whenever this one fails.
+    std::ofstream ofs(stilPath);
+    if (!ofs) {
+      fmt::print(stderr, "error: could not open {} for writing\n", stilPath);
       return 1;
     }
     fmt::print(ofs, "{}", stil.value());

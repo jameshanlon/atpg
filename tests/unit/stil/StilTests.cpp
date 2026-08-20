@@ -102,6 +102,47 @@ TEST_CASE("writeStil rejects duplicate signal names", "[Stil]") {
   CHECK_FALSE(writeStil(graph, {}, "demo").ok());
 }
 
+TEST_CASE("writeStil rejects a signal name that cannot be quoted", "[Stil]") {
+  // SystemVerilog escaped identifiers may contain a double quote, which
+  // would terminate the STIL string it is written into and silently produce
+  // a broken program.
+  Graph graph;
+  const GateId a = graph.addGate(GateType::Pi, "a\"q");
+  const GateId n = graph.addGate(GateType::Not, "n");
+  const GateId y = graph.addGate(GateType::Po, "y");
+  graph.addEdge(a, n);
+  graph.addEdge(n, y);
+  REQUIRE(graph.levelize().ok());
+
+  CHECK_FALSE(writeStil(graph, {}, "demo").ok());
+}
+
+TEST_CASE("writeStil rejects a signal named after a signal group", "[Stil]") {
+  // A port called PI or PO makes every vector's group assignment ambiguous:
+  // a reader could resolve it to the 1-bit signal instead of the group.
+  Graph graph;
+  const GateId a = graph.addGate(GateType::Pi, "PI");
+  const GateId n = graph.addGate(GateType::Not, "n");
+  const GateId y = graph.addGate(GateType::Po, "y");
+  graph.addEdge(a, n);
+  graph.addEdge(n, y);
+  REQUIRE(graph.levelize().ok());
+
+  CHECK_FALSE(writeStil(graph, {}, "demo").ok());
+}
+
+TEST_CASE("writeStil rejects an output named after a signal group", "[Stil]") {
+  Graph graph;
+  const GateId a = graph.addGate(GateType::Pi, "a");
+  const GateId n = graph.addGate(GateType::Not, "n");
+  const GateId y = graph.addGate(GateType::Po, "PO");
+  graph.addEdge(a, n);
+  graph.addEdge(n, y);
+  REQUIRE(graph.levelize().ok());
+
+  CHECK_FALSE(writeStil(graph, {}, "demo").ok());
+}
+
 TEST_CASE("writeStil rejects a design with no primary outputs", "[Stil]") {
   Graph graph;
   const GateId a = graph.addGate(GateType::Pi, "a");

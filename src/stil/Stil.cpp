@@ -50,13 +50,27 @@ Result<std::string> writeStil(const ir::Graph& graph,
     return Error("writeStil: the design has no primary outputs, so there is no response to check");
   }
 
-  // STIL requires signal names to be unique across the whole Signals block,
-  // so inputs and outputs are checked together rather than separately.
+  // Every signal name has to survive being written into a STIL quoted
+  // string, be unique across the whole Signals block (inputs and outputs
+  // together, not each separately), and not collide with the "PI"/"PO"
+  // group names emitted below - each of which would otherwise yield a
+  // program that is broken or ambiguous rather than merely unusual.
   std::set<std::string> seen;
   for (const std::vector<ir::GateId>* group : {&pis, &pos}) {
     for (const ir::GateId id : *group) {
-      if (!seen.insert(graph.gate(id).name).second) {
-        return Error(fmt::format("writeStil: duplicate signal name \"{}\"", graph.gate(id).name));
+      const std::string& name = graph.gate(id).name;
+      if (name.find_first_of("\"\n") != std::string::npos) {
+        return Error(fmt::format(
+            "writeStil: signal name \"{}\" cannot be written as a STIL quoted string", name));
+      }
+      if (name == "PI" || name == "PO") {
+        return Error(
+            fmt::format("writeStil: signal name \"{}\" collides with the signal group of the "
+                        "same name, making every vector ambiguous",
+                        name));
+      }
+      if (!seen.insert(name).second) {
+        return Error(fmt::format("writeStil: duplicate signal name \"{}\"", name));
       }
     }
   }
