@@ -13,7 +13,9 @@ add_executable(
   fsim/FaultSimPropertyTests.cpp
   compact/CompactTests.cpp
   compact/CompactPropertyTests.cpp
-  stil/StilReaderTests.cpp)
+  stil/StilReaderTests.cpp
+  stil/StilTests.cpp
+  stil/StilPropertyTests.cpp)
 
 target_link_libraries(atpg-tests PRIVATE atpg-core slang::slang fmt::fmt ortools::ortools Catch2::Catch2WithMain)
 target_include_directories(atpg-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

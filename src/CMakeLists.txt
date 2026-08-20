@@ -7,7 +7,8 @@ add_library(
   fault/FaultList.cpp
   gen/TestGen.cpp
   fsim/FaultSim.cpp
-  compact/Compact.cpp)
+  compact/Compact.cpp
+  stil/Stil.cpp)
 
 target_include_directories(atpg-core PUBLIC ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(atpg-core PUBLIC slang::slang PRIVATE fmt::fmt ortools::ortools)
