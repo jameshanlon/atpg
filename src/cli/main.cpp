@@ -138,9 +138,8 @@ atpg::Result<std::vector<std::vector<bool>>> readStimulus(const std::string& pat
   return patterns;
 }
 
-atpg::Status runStimulus(const atpg::ir::Graph& graph, const std::string& path) {
-  ATPG_ASSIGN_OR_RETURN(const std::vector<std::vector<bool>> patterns, readStimulus(path));
-
+atpg::Status runStimulus(const atpg::ir::Graph& graph,
+                         const std::vector<std::vector<bool>>& patterns) {
   for (const std::vector<bool>& piValues : patterns) {
     ATPG_ASSIGN_OR_RETURN(const std::vector<bool> outputs, atpg::sim::simulate(graph, piValues));
 
@@ -246,6 +245,18 @@ int main(int argc, char** argv) {
     writeDot(graph, ofs);
   }
 
+  // The run's stimulus, read once and shared by every stage that wants it
+  // rather than re-parsed per option.
+  std::vector<std::vector<bool>> stimulusPatterns;
+  if (!stimulusPath.empty()) {
+    atpg::Result<std::vector<std::vector<bool>>> stimulus = readStimulus(stimulusPath);
+    if (!stimulus) {
+      fmt::print(stderr, "error: {}\n", stimulus.error());
+      return 1;
+    }
+    stimulusPatterns = std::move(stimulus.value());
+  }
+
   // Every stage below wants the same collapsed list, so it is built once
   // rather than re-derived per option - but not at all when no stage needs it,
   // since collapsing is not free on a large design.
@@ -308,18 +319,13 @@ int main(int argc, char** argv) {
       fmt::print(stderr, "error: --fault-sim requires --stimulus to supply the patterns\n");
       return 1;
     }
-    const atpg::Result<std::vector<std::vector<bool>>> patterns = readStimulus(stimulusPath);
-    if (!patterns) {
-      fmt::print(stderr, "error: {}\n", patterns.error());
-      return 1;
-    }
     std::ofstream ofs(faultSimPath);
     if (!ofs) {
       fmt::print(stderr, "error: could not open {} for writing\n", faultSimPath);
       return 1;
     }
     const atpg::Result<atpg::fsim::SimResult> results =
-        atpg::fsim::simulateFaults(graph, faultList, patterns.value());
+        atpg::fsim::simulateFaults(graph, faultList, stimulusPatterns);
     if (!results) {
       fmt::print(stderr, "error: {}\n", results.error());
       return 1;
@@ -327,6 +333,7 @@ int main(int argc, char** argv) {
     writeCoverage(graph, results.value(), ofs);
   }
 
+  std::vector<std::vector<bool>> compactedPatterns;
   if (!compactPath.empty()) {
     if (generateTestsPath.empty() && stimulusPath.empty()) {
       fmt::print(stderr, "error: --compact requires --generate-tests or --stimulus to supply the "
@@ -334,15 +341,8 @@ int main(int argc, char** argv) {
       return 1;
     }
 
-    std::vector<std::vector<bool>> patterns = std::move(generatedPatterns);
-    if (generateTestsPath.empty()) {
-      atpg::Result<std::vector<std::vector<bool>>> stimulus = readStimulus(stimulusPath);
-      if (!stimulus) {
-        fmt::print(stderr, "error: {}\n", stimulus.error());
-        return 1;
-      }
-      patterns = std::move(stimulus.value());
-    }
+    const std::vector<std::vector<bool>>& patterns =
+        generateTestsPath.empty() ? stimulusPatterns : generatedPatterns;
 
     // Opened before the work, like every other output option: a bad path
     // should not cost a full solver campaign before it is reported.
@@ -352,7 +352,7 @@ int main(int argc, char** argv) {
       return 1;
     }
 
-    const atpg::Result<atpg::compact::CompactResult> compacted =
+    atpg::Result<atpg::compact::CompactResult> compacted =
         atpg::compact::compact(graph, faultList, patterns);
     if (!compacted) {
       fmt::print(stderr, "error: {}\n", compacted.error());
@@ -363,10 +363,21 @@ int main(int argc, char** argv) {
     fmt::print("patterns: {} -> {} (coverage {}/{} preserved)\n", patterns.size(),
                compacted.value().patterns.size(), compacted.value().detectedFaults,
                compacted.value().faultCount);
+
+    compactedPatterns = std::move(compacted.value().patterns);
   }
 
+  // One rule for the whole run: the latest pattern set any stage produced.
+  // --fault-sim is deliberately not a consumer - its documented contract is
+  // to simulate the --stimulus patterns specifically.
+  const std::vector<std::vector<bool>>& runPatterns = !compactPath.empty() ? compactedPatterns
+                                                      : !generateTestsPath.empty()
+                                                          ? generatedPatterns
+                                                          : stimulusPatterns;
+  (void)runPatterns;
+
   if (!stimulusPath.empty()) {
-    const atpg::Status simStatus = runStimulus(graph, stimulusPath);
+    const atpg::Status simStatus = runStimulus(graph, stimulusPatterns);
     if (!simStatus) {
       fmt::print(stderr, "error: {}\n", simStatus.error());
       return 1;
