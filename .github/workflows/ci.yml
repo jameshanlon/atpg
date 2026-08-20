@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# OR-Tools is not fetched by CMake - see cmake/Dependencies.cmake for why -
+# so CI installs the prebuilt archive instead. Bump this whenever the
+# find_package version floor in that file moves.
+env:
+  ORTOOLS_RELEASE: v9.15
+  ORTOOLS_VERSION: v9.15.6755
+
+jobs:
+  build-and-test:
+    name: Build and test
+    # Pinned rather than ubuntu-latest, so the runner cannot drift away from
+    # the Ubuntu build of OR-Tools downloaded below.
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # OR-Tools' own CMake config shells out to pkg-config for some of its
+      # dependencies, so it is needed even though atpg never calls it.
+      - name: Install pkg-config
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y pkg-config
+
+      # Installed under HOME rather than /opt: actions/cache runs as the
+      # unprivileged runner user and cannot save a root-owned directory.
+      - name: Cache OR-Tools
+        id: cache-ortools
+        uses: actions/cache@v4
+        with:
+          path: ~/ortools
+          key: ortools-ubuntu-24.04-${{ env.ORTOOLS_VERSION }}
+
+      - name: Install OR-Tools
+        if: steps.cache-ortools.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          url="https://github.com/google/or-tools/releases/download/${ORTOOLS_RELEASE}/or-tools_amd64_ubuntu-24.04_cpp_${ORTOOLS_VERSION}.tar.gz"
+          mkdir -p "$HOME/ortools"
+          # --strip-components=1 drops the archive's own top-level directory.
+          # Its name does not match the archive's ("x86_64_Ubuntu" against
+          # "amd64_ubuntu"), so nothing here should depend on it.
+          curl -fsSL "$url" | tar -xz --strip-components=1 -C "$HOME/ortools"
+          test -f "$HOME/ortools/lib/cmake/ortools/ortoolsConfig.cmake"
+
+      # slang dominates the build, so caching the fetched dependencies is
+      # what keeps a run short. Keyed on the file pinning their versions, so
+      # a dependency bump rebuilds them.
+      - name: Cache fetched dependencies
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: deps-ubuntu-24.04-${{ hashFiles('cmake/Dependencies.cmake') }}
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_PREFIX_PATH="$HOME/ortools"
+
+      # Bounded parallelism: the runner has 4 cores, and an unbounded -j on
+      # dependencies this size is a good way to run out of memory.
+      - name: Build
+        run: cmake --build build --parallel 4
+
+      - name: Test
+        run: |
+          export LD_LIBRARY_PATH="$HOME/ortools/lib:${LD_LIBRARY_PATH:-}"
+          ctest --test-dir build --output-on-failure
