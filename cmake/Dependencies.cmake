@@ -61,3 +61,13 @@ if(NOT ortools_FOUND)
     "  macOS:  brew install or-tools pkg-config\n"
     "  other:  see https://developers.google.com/optimization/install/cpp\n")
 endif()
+
+# doxygen-awesome-css - the Doxygen HTML theme, needed only when building docs.
+if(ATPG_BUILD_DOCS)
+  FetchContent_Declare(
+    doxygen-awesome-css
+    GIT_REPOSITORY https://github.com/jothepro/doxygen-awesome-css.git
+    GIT_TAG v2.4.2
+    GIT_SHALLOW TRUE)
+  FetchContent_MakeAvailable(doxygen-awesome-css)
+endif()

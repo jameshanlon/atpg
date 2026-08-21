@@ -1,0 +1,51 @@
+/** @mainpage
+
+atpg is a gate-level Automatic Test Pattern Generation tool for combinational
+digital circuits, built on [slang](https://sv-lang.com) for its SystemVerilog
+frontend.
+
+It takes a hierarchical design built from SystemVerilog gate primitives,
+flattens it into a gate-level netlist, derives the stuck-at fault list, and
+produces a set of input vectors that detects those faults - together with the
+response each vector should produce. The result can be written as an IEEE 1450
+STIL program for a tester flow.
+
+@section pipeline The pipeline
+
+Each stage is a separate module, and each consumes the previous stage's output:
+
+- @ref atpg::frontend flattens SystemVerilog into a gate netlist.
+- @ref atpg::ir holds that netlist as a levelized graph.
+- @ref atpg::sim evaluates it for one input vector.
+- @ref atpg::fault enumerates and collapses the stuck-at fault list.
+- @ref atpg::gen generates a test per fault class using a SAT-based miter
+  construction, or proves the fault redundant.
+- @ref atpg::fsim fault-simulates a pattern set bit-parallel to report coverage.
+- @ref atpg::compact shrinks a pattern set to an irredundant subset with
+  identical coverage.
+- @ref atpg::stil renders the result as a STIL program.
+
+@section features Features
+
+- Fault collapsing by local equivalence and the checkpoint theorem.
+- SAT-based test generation on OR-Tools CP-SAT, which proves redundancy rather
+  than merely failing to find a test.
+- A generate-and-drop loop that fault-simulates each pattern to skip the solver
+  for faults it already covers.
+- Bit-parallel fault simulation, 64 patterns per machine word, with each fault
+  re-simulated only over its own fanout cone.
+- Greedy pattern compaction producing an irredundant vector set.
+
+@section guides Guides
+
+- @ref user-guide - building the tool and running it.
+- @ref developer-guide - how the modules fit together, and the conventions the
+  code follows.
+
+@section support Support and contributions
+
+- Bug reports: [open an issue](https://github.com/jameshanlon/atpg/issues) on
+  GitHub.
+- Source: [github.com/jameshanlon/atpg](https://github.com/jameshanlon/atpg).
+
+*/

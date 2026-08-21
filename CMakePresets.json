@@ -1,0 +1,14 @@
+{
+  "version": 3,
+  "configurePresets": [
+    {
+      "name": "docs",
+      "displayName": "Documentation",
+      "binaryDir": "${sourceDir}/build/docs",
+      "cacheVariables": {
+        "ATPG_BUILD_DOCS": "ON",
+        "ATPG_BUILD_TESTS": "OFF"
+      }
+    }
+  ]
+}

@@ -157,6 +157,24 @@ Formatting is enforced by [`clang-format`](https://clang.llvm.org/docs/ClangForm
 pre-commit install
 ```
 
+### Documentation
+
+API documentation is generated with [Doxygen](https://www.doxygen.nl) and
+published to GitHub Pages on every push to `main`. Building it locally needs
+Doxygen installed; the theme is fetched automatically:
+
+```sh
+cmake --preset=docs
+cmake --build build/docs --target docs
+```
+
+The result lands in `build/docs/docs/doxygen/html`. The Doxyfile sets
+`WARN_AS_ERROR = FAIL_ON_WARNINGS`, so a broken cross-reference or a malformed
+doc comment fails the build rather than being quietly published.
+
+Documentation is off by default in an ordinary build, so Doxygen is not needed
+to build or test the tool.
+
 ## License
 
 MIT - see [LICENSE](LICENSE).

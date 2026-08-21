@@ -1,0 +1,68 @@
+/** @page user-guide User guide
+
+@section building Building
+
+atpg needs a C++20 compiler and CMake 3.21 or newer. slang, Catch2, CLI11 and
+fmt are fetched automatically on first configure, so a network connection is
+needed then.
+
+OR-Tools 9.15 or newer and pkg-config are required system packages, resolved
+with `find_package` rather than fetched, because building OR-Tools from source
+is far slower than every other dependency:
+
+```sh
+brew install or-tools pkg-config   # macOS
+cmake -B build
+cmake --build build
+ctest --test-dir build
+```
+
+@section invocation Invocation
+
+```sh
+atpg <file.sv> --top <module> [options]
+```
+
+The design must be built from SystemVerilog gate primitives (`and`, `nand`,
+`or`, `nor`, `xor`, `xnor`, `buf`, `not`) and must be purely combinational.
+
+@section options Options
+
+- `--dump-graph <path>` writes the flattened gate graph as Graphviz dot.
+- `--dump-faults <path>` writes the collapsed fault list, one line per class.
+- `--generate-tests <path>` writes a pattern, or `redundant`/`aborted`, per
+  fault class.
+- `--drop` makes `--generate-tests` use the generate-and-drop loop, which
+  fault-simulates each pattern so faults it already covers never reach the
+  solver.
+- `--time-limit <seconds>` bounds the per-fault CP-SAT solve.
+- `--stimulus <path>` reads newline-separated `0`/`1` vectors and prints the
+  simulated outputs.
+- `--fault-sim <path>` fault-simulates the `--stimulus` vectors and writes a
+  coverage report. This deliberately reads the stimulus specifically, rather
+  than the run's current pattern set: it measures an externally supplied vector
+  set.
+- `--compact <path>` compacts the run's pattern set and writes it in the format
+  `--stimulus` reads.
+- `--stil <path>` writes the run's pattern set as an IEEE 1450 STIL program.
+
+@section pattern-set The run's pattern set
+
+`--compact` and `--stil` both consume whatever the latest stage produced: the
+compacted set if `--compact` ran, otherwise the generated set if
+`--generate-tests` ran, otherwise the `--stimulus` set. So a full run is a
+single invocation:
+
+```sh
+atpg design.sv --top top --generate-tests tests.txt --compact compact.txt \
+    --stil design.stil
+```
+
+@section stil-caveat A caveat on the STIL output
+
+The emitted STIL follows the IEEE 1450-1999 structure, but has not been
+validated against a real STIL reader. The tests check the program's semantics -
+signal order, group membership, stimulus values and expected responses - not
+that a tester would load it.
+
+*/

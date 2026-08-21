@@ -1,0 +1,72 @@
+name: Documentation
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Kept in step with ci.yml: configuring atpg at all needs OR-Tools, even
+# though the docs target compiles no C++.
+env:
+  ORTOOLS_RELEASE: v9.15
+  ORTOOLS_VERSION: v9.15.6755
+  DOXYGEN_VERSION: "1.18.0"
+
+jobs:
+  docs:
+    name: Build and publish documentation
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pkg-config
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y pkg-config
+
+      - name: Cache OR-Tools
+        id: cache-ortools
+        uses: actions/cache@v4
+        with:
+          path: ~/ortools
+          key: ortools-ubuntu-24.04-${{ env.ORTOOLS_VERSION }}
+
+      - name: Install OR-Tools
+        if: steps.cache-ortools.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          url="https://github.com/google/or-tools/releases/download/${ORTOOLS_RELEASE}/or-tools_amd64_ubuntu-24.04_cpp_${ORTOOLS_VERSION}.tar.gz"
+          mkdir -p "$HOME/ortools"
+          curl -fsSL "$url" | tar -xz --strip-components=1 -C "$HOME/ortools"
+          test -f "$HOME/ortools/lib/cmake/ortools/ortoolsConfig.cmake"
+
+      - uses: ssciwr/doxygen-install@v1
+        with:
+          version: ${{ env.DOXYGEN_VERSION }}
+
+      - name: Cache fetched dependencies
+        uses: actions/cache@v4
+        with:
+          path: build/docs/_deps
+          key: docs-deps-ubuntu-24.04-${{ hashFiles('cmake/Dependencies.cmake') }}
+
+      # The Doxyfile sets WARN_AS_ERROR = FAIL_ON_WARNINGS, so a broken
+      # cross-reference or a malformed doc comment fails this step.
+      - name: Build
+        run: |
+          cmake --preset=docs -DCMAKE_PREFIX_PATH="$HOME/ortools"
+          cmake --build build/docs --target docs
+
+      # Built on every pull request so documentation breakage is caught before
+      # merge, but only published from main.
+      - name: Publish
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./build/docs/docs/doxygen/html

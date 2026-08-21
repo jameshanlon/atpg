@@ -1,0 +1,69 @@
+/** @page developer-guide Developer guide
+
+@section layout Layout
+
+Public headers live under `include/atpg/`, one subdirectory per module, and
+implementations mirror that structure under `src/`. Everything is one static
+library, `atpg-core`, and one namespace, `atpg`, split into sub-namespaces by
+responsibility rather than into separate CMake targets. The `atpg` executable
+is a thin CLI over that library.
+
+Tests live in `tests/unit/`, mirroring `src/`. Small hand-verifiable fixtures
+live in `tests/data/`.
+
+@section errors Error handling
+
+atpg does not use exceptions. Every fallible function returns
+@ref atpg::Result "Result<T>" - a value or an error message - or
+@ref atpg::Status, for operations with no value. Both are `[[nodiscard]]`, and
+failures propagate with the `ATPG_RETURN_IF_ERROR` and `ATPG_ASSIGN_OR_RETURN`
+macros rather than hand-rolled checks.
+
+The one unavoidable exception boundary is CLI11's `App::parse()`, which has no
+non-throwing entry point. It is caught immediately at that boundary and turned
+into an exit code; no exception reaches atpg's own code.
+
+@section verification Verification
+
+Several of this project's algorithms are ones where hand-derived expected
+values stop being trustworthy beyond a single small case. For those, the tests
+pair the usual hand-traced fixtures with a property test checking an invariant
+against an independently derived ground truth over many generated circuits.
+
+Two rules make those property tests worth their runtime:
+
+- **The oracle is a second implementation.** `tests/unit/RandomCircuit.hpp`
+  contains its own gate-level simulator, deliberately never delegating to
+  @ref atpg::sim. A bug present in both the production simulator and the oracle
+  would be invisible, and this project has twice found the same defect
+  independently reintroduced in separately written modules.
+
+- **Invariants must be able to fail.** Checking that an output is *sound* is
+  not enough when a do-nothing implementation is also sound. Fault dropping and
+  pattern compaction both need a *completeness* invariant as well - that no
+  work was skipped - because outcome agreement alone is satisfied by a loop
+  that drops nothing and a compactor that keeps everything. Each such invariant
+  is verified by deliberately breaking the code and confirming the test fails
+  and names itself.
+
+@section conventions Conventions
+
+- Format with clang-format, LLVM style, 100 columns; `.pre-commit-config.yaml`
+  enforces it. Run `pre-commit install` once per clone.
+- Use `fmt::format`/`fmt::print`, never stream operators or string
+  concatenation. Catch2's `INFO`/`FAIL` macros are the one exception, since
+  they require `<<` by design.
+- Brace every control-flow body, including single-line ones.
+- Parse command-line arguments with CLI11, not a hand-rolled argv loop.
+- Document public functions, methods and classes with a `///` comment.
+
+@section ortools A note on mixing Catch2 with OR-Tools
+
+OR-Tools transitively pulls in abseil's fatal `CHECK`, which shadows Catch2's
+`CHECK` and silently turns assertions into aborts. A test file that includes
+OR-Tools headers directly must include them first, then `#undef CHECK`, then
+Catch2's header, and only then `../Test.hpp` - which transitively includes
+Catch2 and would otherwise satisfy its include guard before the `#undef` runs.
+See `tests/unit/gen/TestGenTests.cpp`.
+
+*/
