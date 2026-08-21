@@ -5,12 +5,19 @@ include(FetchContent)
 # inside a subdirectory are only visible to that subdirectory and its
 # children, and slang resolves its own copy of fmt from within its own
 # external/ subdirectory - too narrow a scope for atpg's own targets to see.
+# The version is bounded at both ends, and must track whatever slang's
+# external/CMakeLists.txt pins: because fmt is resolved here first, slang's
+# own declaration of it is ignored, so slang ends up compiling against this
+# copy. slang v11.0 relies on <fmt/core.h> transitively providing
+# fmt::format, which fmt 12.2.0 stopped doing, so anything >= 12.2 fails to
+# build slang. The upper bound applies to the find_package path too - a
+# system fmt that is too new breaks it exactly the same way.
 FetchContent_Declare(
   fmt
   GIT_REPOSITORY https://github.com/fmtlib/fmt.git
-  GIT_TAG 12.2.0
+  GIT_TAG 12.1.0
   GIT_SHALLOW TRUE
-  FIND_PACKAGE_ARGS 12.1)
+  FIND_PACKAGE_ARGS 12.1...<12.2)
 FetchContent_MakeAvailable(fmt)
 
 # slang - SystemVerilog frontend. Tools/tests/mimalloc are disabled to keep
